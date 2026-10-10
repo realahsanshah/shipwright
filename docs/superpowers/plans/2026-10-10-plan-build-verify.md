@@ -654,7 +654,7 @@ emit(reportFile, 'passes: every check green and every criterion has evidence', r
     - Each rule hits on an added line and reports the right file and new-file line number from the hunk header (`@@ -1,0 +5,2 @@` puts the first added line at 5).
     - Removed (`-`) lines and context lines are not scanned.
     - The `+++ b/` header is not treated as content.
-    - A `generic-assignment` rule hit: `password = "hunter2hunter2"`.
+    - A `generic-assignment` rule hit: `password = "hunter2hunter2"`. (shipwright:allow-secret)
     - Placeholders are not hits: `password = "changeme"`, `api_key: "<your key>"`, `token = "${TOKEN}"`, `secret = "xxxxxxxx"`.
     - A line containing `shipwright:allow-secret` is skipped.
     - An added file whose path is a secret path (`config/.env.production`) gives a `secret-file` finding at line 0, even if it is empty.
