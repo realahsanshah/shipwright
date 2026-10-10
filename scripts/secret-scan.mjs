@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Scans the branch's changes (committed since the merge-base, uncommitted, and
 // untracked) for credentials. Prints file:line and rule only, never the value.
+// File identity comes from `git diff --name-status`, never from diff headers.
 // Usage: node secret-scan.mjs [--base <ref>]   (run from the repo root)
 import fs from 'node:fs';
 import path from 'node:path';
@@ -19,52 +20,56 @@ export const RULES = [
   { id: 'anthropic-api-key', re: /\bsk-ant-[A-Za-z0-9_-]{20,}\b/ },
   { id: 'generic-assignment', re: /\b(?:password|passwd|secret|token|api[_-]?key|access[_-]?key|client[_-]?secret)\b["']?\s*[:=]\s*["']([^"'\s]{8,})["']/i },
 ];
-const PLACEHOLDER = /^(?:x+|\*+|changeme|change_me|example|placeholder|dummy|redacted|your[_-].*)$|[<>{}$]/i;
+// A generic-assignment value is a placeholder only when the WHOLE value matches.
+const PLACEHOLDER = /^(?:x+|\*+|changeme|change_me|example|placeholder|dummy|redacted|your[_-][a-z_-]*|<[^>]*>|\$\{[^}]*\}|\{\{[^}]*\}\})$/i;
 const ALLOW = 'shipwright:allow-secret';
+const MAX_UNTRACKED_BYTES = 1024 * 1024;
 
 export function scanLines(file, lines) {
   const findings = [];
   for (const { line, text } of lines) {
     if (text.includes(ALLOW)) continue;
     for (const rule of RULES) {
-      const m = text.match(rule.re);
-      if (!m) continue;
-      if (rule.id === 'generic-assignment' && PLACEHOLDER.test(m[1])) continue;
-      findings.push({ file, line, rule: rule.id });
+      const re = new RegExp(rule.re.source, rule.re.flags + 'g');
+      let hit = false;
+      for (const m of text.matchAll(re)) {
+        if (rule.id === 'generic-assignment' && PLACEHOLDER.test(m[1])) continue;
+        hit = true;
+        break;
+      }
+      if (hit) findings.push({ file, line, rule: rule.id });
     }
   }
   return findings;
 }
 
-export function scanDiff(diffText) {
-  const findings = [];
-  let file = null;
-  let isNew = false;
-  let lineNo = 0;
-  let added = [];
-  const flush = () => {
-    if (file === null) return;
-    if (isNew && isSecretPath(file, '.')) findings.push({ file, line: 0, rule: 'secret-file' });
-    findings.push(...scanLines(file, added));
-    added = [];
-  };
-  for (const raw of diffText.split(/\r?\n/)) {
-    if (raw.startsWith('diff --git ')) { flush(); file = null; isNew = false; continue; }
-    if (raw.startsWith('new file mode')) { isNew = true; continue; }
-    if (raw.startsWith('--- ')) { if (raw === '--- /dev/null') isNew = true; continue; }
-    if (raw.startsWith('+++ ')) { file = raw === '+++ /dev/null' ? null : raw.slice(4).replace(/^b\//, ''); continue; }
-    const hunk = raw.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-    if (hunk) { lineNo = Number(hunk[1]); continue; }
-    if (file === null) continue;
-    if (raw.startsWith('+')) { added.push({ line: lineNo, text: raw.slice(1) }); lineNo += 1; }
-    else if (raw.startsWith(' ')) lineNo += 1;
+// Scans one file's unified diff. The file name is supplied by the caller; every
+// line outside a hunk body (headers, "Binary files differ") is ignored, and hunk
+// bodies are consumed by their declared counts so "+++ ..." content is content.
+export function scanFileDiff(file, diffText) {
+  const added = [];
+  const lines = diffText.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i += 1) {
+    const hunk = lines[i].match(/^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
+    if (!hunk) continue;
+    let oldRem = hunk[1] === undefined ? 1 : Number(hunk[1]);
+    let newRem = hunk[3] === undefined ? 1 : Number(hunk[3]);
+    let lineNo = Number(hunk[2]);
+    while ((oldRem > 0 || newRem > 0) && i + 1 < lines.length) {
+      const raw = lines[i + 1];
+      if (raw.startsWith('\\')) { i += 1; continue; }
+      if (raw.startsWith('+') && newRem > 0) { added.push({ line: lineNo, text: raw.slice(1) }); lineNo += 1; newRem -= 1; }
+      else if (raw.startsWith('-') && oldRem > 0) oldRem -= 1;
+      else if (raw.startsWith(' ') && oldRem > 0 && newRem > 0) { lineNo += 1; oldRem -= 1; newRem -= 1; }
+      else break;
+      i += 1;
+    }
   }
-  flush();
-  return findings;
+  return scanLines(file, added);
 }
 
 function git(args, cwd) {
-  const r = spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+  const r = spawnSync('git', ['--literal-pathspecs', '-c', 'core.quotepath=false', ...args], { cwd, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
   if (r.error || r.status !== 0) throw new Error((r.stderr || r.error?.message || 'git failed').trim());
   return r.stdout;
 }
@@ -82,29 +87,45 @@ function main() {
   const cwd = process.cwd();
   let findings;
   let fileCount;
+  let largeSkipped = 0;
   try {
     git(['rev-parse', '--is-inside-work-tree'], cwd);
     const base = baseIdx >= 0 ? args[baseIdx + 1] : defaultBase(cwd);
     if (!base) throw new Error('--base needs a ref');
     const mergeBase = git(['merge-base', base, 'HEAD'], cwd).trim();
-    const diff = git(['diff', '--unified=0', '--no-color', '--no-ext-diff', mergeBase], cwd);
-    findings = scanDiff(diff);
+    const ns = git(['diff', '--name-status', '-z', '--no-renames', mergeBase], cwd).split('\0');
+    const changed = [];
+    for (let i = 0; i + 1 < ns.length; i += 2) {
+      const status = ns[i][0];
+      if (status === 'D') continue;
+      changed.push({ status, file: ns[i + 1] });
+    }
+    findings = [];
+    for (const { status, file } of changed) {
+      if (status === 'A' && isSecretPath(file, '.')) findings.push({ file, line: 0, rule: 'secret-file' });
+      const diff = git(['diff', '-U0', '--no-color', '--no-ext-diff', mergeBase, '--', file], cwd);
+      findings.push(...scanFileDiff(file, diff));
+    }
     const untracked = git(['ls-files', '--others', '--exclude-standard', '-z'], cwd).split('\0').filter(Boolean);
     for (const file of untracked) {
       if (isSecretPath(file, '.')) findings.push({ file, line: 0, rule: 'secret-file' });
       let text = '';
-      try { text = fs.readFileSync(path.join(cwd, file), 'utf8'); } catch { continue; }
+      try {
+        if (fs.statSync(path.join(cwd, file)).size > MAX_UNTRACKED_BYTES) { largeSkipped += 1; continue; }
+        text = fs.readFileSync(path.join(cwd, file), 'utf8');
+      } catch { continue; }
       if (text.includes('\0')) continue;
       findings.push(...scanLines(file, text.split(/\r?\n/).map((t, i) => ({ line: i + 1, text: t }))));
     }
-    fileCount = new Set([...diff.matchAll(/^\+\+\+ b\/(.+)$/gm)].map((m) => m[1]).concat(untracked)).size;
+    fileCount = changed.length + untracked.length;
   } catch (err) {
     process.stderr.write(`secret-scan: ${err.message}\n`);
     process.exitCode = 2;
     return;
   }
   if (findings.length === 0) {
-    process.stdout.write(`secret-scan: clean (${fileCount} files scanned)\n`);
+    const skipped = largeSkipped ? `, ${largeSkipped} large file${largeSkipped === 1 ? '' : 's'} skipped` : '';
+    process.stdout.write(`secret-scan: clean (${fileCount} files scanned${skipped})\n`);
     return;
   }
   process.stdout.write(`secret-scan: ${findings.length} finding(s)\n${findings.map((f) => `  - ${f.file}:${f.line} ${f.rule}`).join('\n')}\n`);
