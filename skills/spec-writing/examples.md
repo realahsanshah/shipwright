@@ -24,11 +24,13 @@ Admins get an Export button on the appointments page. It downloads the currently
 - AC-5: Given filters are applied (date range, doctor, status), when the admin clicks Export, then the CSV contains exactly the rows shown by those filters, not the whole table.
 - AC-6: Given an admin exports a filter that matches 50,000 rows, when the export runs, then the complete file downloads in under 60 seconds.
 - AC-7: Given a cell value starting with `=`, `+`, `-` or `@`, when it is written to the CSV, then it is prefixed with a single quote so spreadsheets do not run it as a formula. This is an extra AC: CSV injection is a security issue the ticket does not mention.
+- AC-8: Given an admin requests an export with an unsupported or malformed filter value (e.g. `status=banana`, `from=not-a-date`), when the request is made, then the response is 400 with a message naming the bad parameter and no file is returned.
+- AC-9: Given the database fails partway through an export, when the error occurs, then the response ends in an error status (the download is not presented as complete) and the admin sees an "Export failed" message.
 
 ## Affected areas
 
 - `web/src/pages/Appointments.tsx`: add the Export button, role-gated.
-- `api/routes/appointments.py`: add `GET /appointments/export` (new endpoint) taking the same query params as the list endpoint.
+- `api/routes/appointments.py`: add `GET /appointments/export` (new) taking the same query params as the list endpoint.
 - `api/services/csv_export.py` (new): module using the standard library `csv` writer.
 
 ## Data changes and migrations
@@ -38,9 +40,12 @@ None.
 ## Edge cases
 
 - Empty result set (AC-4): file has only the header row, status 200, no error.
+- Exactly one matching appointment (AC-4): header plus one row.
 - Cells starting with `=`, `+`, `-`, `@` (AC-7): escaped as described.
 - Names containing commas, quotes or newlines (AC-4): quoted per RFC 4180.
-- Filter matching 50k rows (AC-6): completes within the time limit.
+- Filter matching 50k rows (AC-6): completes within 60 seconds.
+- Invalid input (AC-8): unsupported or malformed filter params return 400 with a message, no file.
+- Database failure mid-export (AC-9): error response, no partial file presented as complete. No other external service is called.
 - Non-admin role (AC-2, AC-3): button hidden and the endpoint returns 403.
 - Filters changed while the download runs (AC-5): the export uses the filters sent with the request.
 - Appointment times (AC-4): written in UTC ISO 8601, so locale and time zone do not change the file.
@@ -56,6 +61,8 @@ None.
 | AC-5 | `test_export_respects_filters`                                        | integration |
 | AC-6 | `test_export_50k_rows_under_60s` asserts status 200 and elapsed time  | integration |
 | AC-7 | `test_export_escapes_formula_prefixes` (four prefixes)                | unit        |
+| AC-8 | `test_export_bad_filter_returns_400`                                   | integration |
+| AC-9 | `test_export_db_error_returns_error_status` (fault-injected query)    | integration |
 
 ## Risks
 
