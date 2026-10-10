@@ -264,7 +264,7 @@ export function checkVerify(spec, report) {
 
 export const REVIEW_SECTIONS = ['Code review', 'Security review'];
 export const PR_SECTIONS = ['Summary', 'Acceptance criteria', 'Test plan', 'Risks', 'Notes for CLAUDE.md'];
-const FINDING = /^\s*[-*]\s+\[(blocking|non-blocking)\]\s*(.*)$/i;
+const FINDING = /^\s*(?:[-*+]|\d+[.)])\s+(?:\*\*)?\[(blocking|non-blocking)\](?:\*\*)?\s*(.*)$/i;
 
 function preambleField(preamble, name) {
   for (const line of preamble) {

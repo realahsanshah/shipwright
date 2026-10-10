@@ -425,3 +425,10 @@ test('sameCommit compares by prefix, case-insensitively', () => {
   assert.equal(sameCommit('9e05129', '1111111'), false);
   assert.equal(sameCommit(null, '9e05129'), false);
 });
+
+test('review: numbered and bold-tagged blocking findings under PASS fail', () => {
+  for (const finding of ['1. [blocking] a.js:1 — bad → fix', '1) [blocking] a.js:1 — bad → fix', '- **[blocking]** a.js:1 — bad → fix']) {
+    const text = reviewText({ code: `Verdict: PASS\n\n${finding}` });
+    assert.match(reviewErrors(text).join('\n'), /says PASS but has a blocking finding/, finding);
+  }
+});

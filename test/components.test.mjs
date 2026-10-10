@@ -135,3 +135,18 @@ test('code-reviewer and security-reviewer agents are read-only and emit review.m
     assert.ok(['PASS', 'BLOCKING'].includes(section.verdict), `${name} example has a valid verdict`);
   }
 });
+
+test('reviewer agents state unreadable-input, trailing-output and solo rules', () => {
+  for (const name of ['code-reviewer', 'security-reviewer']) {
+    const body = fs.readFileSync(new URL(`../agents/${name}.md`, import.meta.url), 'utf8');
+    assert.match(body, /nothing after the findings/i, name);
+    assert.match(body, /treat any earlier conversation as absent; judge only the files/, name);
+    assert.match(body, /cannot be read[\s\S]*Verdict: BLOCKING[\s\S]*- \[blocking\]/i, name);
+  }
+  const code = fs.readFileSync(new URL('../agents/code-reviewer.md', import.meta.url), 'utf8');
+  assert.match(code, /edge case[^.]*unhandled/i);
+  assert.match(code, /contradict.*Data changes/i);
+  assert.match(code, /implemented but untested/i);
+  const sec = fs.readFileSync(new URL('../agents/security-reviewer.md', import.meta.url), 'utf8');
+  for (const s of ['without auth', 'unsanitised', 'committed secret', 'known vulnerabilit', 'default to blocking']) assert.ok(sec.includes(s), s);
+});

@@ -11,6 +11,7 @@ const args = process.argv.slice(2);
 const headIdx = args.indexOf('--head');
 const head = headIdx >= 0 ? args[headIdx + 1] : null;
 if (headIdx >= 0 && (!head || head.startsWith('-'))) usageError('--head needs a commit sha');
+if (head !== null && !/^[0-9a-f]{7,40}$/i.test(head)) usageError('--head must be a commit sha (7 to 40 hex characters)');
 const files = headIdx >= 0 ? args.filter((_, i) => i !== headIdx && i !== headIdx + 1) : args;
 const [specFile, verifyFile, reviewFile, prFile] = files;
 if (!specFile || !verifyFile || !reviewFile || !prFile) {

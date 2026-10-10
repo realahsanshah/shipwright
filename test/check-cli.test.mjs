@@ -98,4 +98,9 @@ test('check-review: valid exits 0, FAIL verify and stale commits exit 1, usage e
 
   assert.equal(run('check-review.mjs', specFile, verifyFile, reviewFile).status, 2);
   assert.equal(run('check-review.mjs', specFile, verifyFile, reviewFile, prFile, '--head').status, 2);
+  for (const bad of ['HEAD', 'zzzzzzz', 'abc12', 'abc123;rm']) {
+    const r = run('check-review.mjs', specFile, verifyFile, reviewFile, prFile, '--head', bad);
+    assert.equal(r.status, 2, bad);
+    assert.match(r.stderr, /--head/);
+  }
 });
