@@ -40,7 +40,9 @@ Never read `.env`, `*.pem`, `*.key` or `secrets/**`. Never print or store a secr
 
 8. **Write `CLAUDE.md`** in the repo root with the results of steps 1 to 6 and a pointer to `.delivery/deploy.yml`. If the project already has a `CLAUDE.md`, never overwrite it. Show the proposed additions as a diff and apply them only after the engineer approves.
 
-9. **Permissions.** Ask before merging the deny rules from `${CLAUDE_PLUGIN_ROOT}/settings/project-settings.json` into the project's `.claude/settings.json`. Merging means taking the union of the `permissions.deny` arrays and keeping every existing key. Show the resulting file first and wait for a yes. If the engineer declines, skip this step.
+9. **Delivery files.** Ensure the project `.gitignore` contains `.delivery/active` (per-machine state); add the line if missing. `.delivery/deploy.yml` and the per-ticket folders are committed, the per-ticket folders by `/ship` as the audit trail.
+
+10. **Permissions.** Ask before merging the deny rules from `${CLAUDE_PLUGIN_ROOT}/settings/project-settings.json` into the project's `.claude/settings.json`. Merging means taking the union of the `permissions.deny` arrays and keeping every existing key. Show the resulting file first and wait for a yes. If the engineer declines, skip this step.
 
 ## Gate
 

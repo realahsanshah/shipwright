@@ -159,3 +159,21 @@ test('/review: embedded templates satisfy checkReview and checkPrDescription', a
   assert.ok(parsed.title);
   assert.deepEqual(checkPrDescription(parseSpec(specText({ acs: ['AC-1'] })), parsed), []);
 });
+
+test('/ship: entry gate, delivery record, push, PR, CI, safety', () => {
+  const md = read('commands/ship.md');
+  for (const phrase of [
+    'check-review.mjs', ':(exclude).delivery', '--head', '<id> delivery record',
+    'git add .delivery/<id>', 'git push -u origin feat/<id>', 'gh auth status',
+    'gh pr create', '--body-file', 'gh pr edit', 'gh pr checks', 'no CI',
+    'never merge', 'deploy.yml',
+  ]) assert.ok(md.includes(phrase), `ship.md must mention "${phrase}"`);
+  assert.match(md, /never force|never .*--force/i);
+});
+
+test('delivery rules: push exception for /ship; onboard gitignores .delivery/active', () => {
+  const rules = read('rules/delivery-rules.md');
+  assert.ok(rules.includes('except') && rules.includes('/ship'));
+  const onboard = read('commands/onboard.md');
+  assert.ok(onboard.includes('.delivery/active') && onboard.includes('.gitignore'));
+});
