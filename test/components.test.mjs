@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseFrontmatter } from './helpers/frontmatter.mjs';
-import { SPEC_SECTIONS } from '../scripts/lib/delivery-docs.mjs';
+import { SPEC_SECTIONS, parseReview } from '../scripts/lib/delivery-docs.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
@@ -112,5 +112,26 @@ test('frontmatter values containing ": " are quoted (YAML safety)', () => {
       if (!kv || !kv[2].includes(': ')) continue;
       assert.match(kv[2], /^(".*"|'.*')$/, `${file}: unquoted value with ": " in "${kv[1]}"`);
     }
+  }
+});
+
+test('code-reviewer and security-reviewer agents are read-only and emit review.md-shaped output', () => {
+  for (const name of ['code-reviewer', 'security-reviewer']) {
+    const file = `agents/${name}.md`;
+    assert.ok(fs.existsSync(new URL(`../${file}`, import.meta.url)), `${file} exists`);
+    const body = fs.readFileSync(new URL(`../${file}`, import.meta.url), 'utf8').replace(/^\uFEFF/, '');
+    for (const s of ['Verdict: PASS', 'Verdict: BLOCKING', '[blocking]', '[non-blocking]', 'spec.md', 'verify-report.md', 'diff']) {
+      assert.ok(body.includes(s), `${name} must mention ${s}`);
+    }
+    const tools = parseFrontmatter(body).data.tools;
+    assert.ok(tools, `${name} declares tools`);
+    const list = tools.split(',').map((t) => t.trim()).filter(Boolean).sort();
+    assert.deepEqual(list, ['Glob', 'Grep', 'Read'], `${name} tools are exactly read-only`);
+    const fence = body.match(/```[^\n]*\r?\n([\s\S]*?)```/);
+    assert.ok(fence, `${name} has an illustrative fenced example`);
+    const parsed = parseReview(`## Code review\n\n${fence[1]}`);
+    const section = parsed.sections.get('Code review');
+    assert.ok(section, `${name} example parses as a review section`);
+    assert.ok(['PASS', 'BLOCKING'].includes(section.verdict), `${name} example has a valid verdict`);
   }
 });
