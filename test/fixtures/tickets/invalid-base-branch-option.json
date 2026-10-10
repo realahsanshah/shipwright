@@ -1,0 +1,17 @@
+{
+  "id": "gh-17",
+  "source": "github",
+  "flow": "task",
+  "type": "bug",
+  "title": "Crash on empty search",
+  "description": "Searching with an empty box throws.",
+  "acceptance_criteria": [],
+  "reproduction_steps": [
+    "Open /search",
+    "Press Enter with the box empty"
+  ],
+  "open_questions": [
+    "What should an empty search show?"
+  ],
+  "base_branch": "--upload-pack=touch x"
+}

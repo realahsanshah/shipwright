@@ -40,11 +40,12 @@ Only the engineer approves a spec. You must never mark the spec approved yoursel
 
 ## Gate
 
-PASS only when all three hold:
+PASS only when all four hold:
 
 - `.delivery/<id>/spec-review.md` starts with `Verdict: PASS`, and it reviewed the current version of `spec.md`.
 - `## Open questions` in `spec.md` says exactly `None.`
 - The `Status:` line says `Status: approved by <name> on <YYYY-MM-DD>`, set by the engineer's approval.
+- After recording the approval, `node "${CLAUDE_PLUGIN_ROOT}/scripts/check-spec.mjs" .delivery/<id>/spec.md` exits 0. If it exits non-zero, show its output; that is a FAIL.
 
 On PASS, print the id, the approver, and the path to `spec.md`, and say that `/plan` is next.
 

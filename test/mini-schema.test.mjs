@@ -52,3 +52,13 @@ test('type checks distinguish array, null, integer', () => {
 test('throws on unsupported keywords anywhere in the schema, even unvisited branches', () => {
   assert.throws(() => validate({ type: 'object', properties: { a: { oneOf: [] } } }, {}), /unsupported schema keyword "oneOf" at \/properties\/a/);
 });
+
+test('base_branch must be a safe ref name; mini validator and ajv agree', () => {
+  const base = fixtures.find(([n]) => n === 'valid-minimal-bug.json')[1];
+  const cases = { main: true, 'release/2.1': true, 'feat/a_b-c.d': true, '-x': false, '--upload-pack=x': false, 'a..b': false, 'a b': false, 'a;b': false, '': false };
+  for (const [value, ok] of Object.entries(cases)) {
+    const data = { ...base, base_branch: value };
+    assert.equal(new Ajv2020({ strict: true }).validate(schema, data), ok, `ajv ${value}`);
+    assert.equal(validate(schema, data).length === 0, ok, `mini ${value}`);
+  }
+});
