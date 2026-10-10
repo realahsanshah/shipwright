@@ -10,5 +10,5 @@ These rules apply to every Shipwright command in this session.
 - Tickets that need a product or design decision go back to the author with questions at the spec gate; do not decide for them.
 - Secrets: never read, print or store a secret value. Work with references (`account_ref: client-prod`); scripts and CI resolve them from the client's own vault. The pre-tool guard blocks secret files and the project's danger zones; do not try to work around it.
 - Never run `git push --force`, `terraform destroy`, or `kubectl delete namespace`. If one is needed, the engineer runs it.
-- Never push, except `/ship` pushing `feat/<id>` after its gate passes; never force. Stage files by path (never `git add -A`). Never merge a PR; the engineer does.
+- Never push, except `/ship` pushing `feat/<id>` after its entry gate passes; never force. Stage files by path (never `git add -A`). Never merge a PR; the engineer does.
 - Before deploying or publishing anywhere, check the connection with the platform's verify command; if it is missing, show the engineer the one command to connect, say why, and wait.

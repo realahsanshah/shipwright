@@ -167,6 +167,7 @@ test('/ship: entry gate, delivery record, push, PR, CI, safety', () => {
     'git add .delivery/<id>', 'git push -u origin feat/<id>', 'gh auth status',
     'gh pr create', '--body-file', 'gh pr edit', 'gh pr checks', 'no CI',
     'never merge', 'deploy.yml',
+    'git diff --cached', 'symbolic-ref', 'secret-scan.mjs', 'check-ignore', '--title "$(cat',
   ]) assert.ok(md.includes(phrase), `ship.md must mention "${phrase}"`);
   assert.match(md, /never force|never .*--force/i);
 });
