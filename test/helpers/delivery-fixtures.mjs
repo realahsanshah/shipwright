@@ -49,3 +49,13 @@ Spec: .delivery/HC-142/spec.md (approved by ${spec.approver} on ${spec.approvedO
 
 ${body}`;
 }
+
+// A DONE entry per plan step; `overrides` maps step number to field overrides (null drops a field).
+export function buildLogText(plan, overrides = {}) {
+  const entries = plan.steps.map((s) => {
+    const f = { Status: 'DONE', Commit: '3f9c2ab', RED: '`npm test` — 1 failed', GREEN: '`npm test` — 1 passed', Attempts: '1', ...(overrides[s.n] ?? {}) };
+    const lines = Object.entries(f).filter(([, v]) => v !== null).map(([k, v]) => `- ${k}: ${v}`);
+    return `## Step ${s.n}: ${s.title}\n${lines.join('\n')}\n`;
+  });
+  return `# Build log: HC-142\n\n${entries.join('\n')}`;
+}

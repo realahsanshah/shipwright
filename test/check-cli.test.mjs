@@ -5,7 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { specText, planText } from './helpers/delivery-fixtures.mjs';
+import { specText, planText, buildLogText } from './helpers/delivery-fixtures.mjs';
+import { parsePlan } from '../scripts/lib/delivery-docs.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'check cli '));
@@ -44,4 +45,16 @@ test('check-plan: valid exits 0, invalid exits 1, usage exits 2', () => {
   assert.equal(bad.status, 1);
   assert.match(bad.stdout, /^failed: /);
   assert.equal(run('check-plan.mjs', spec).status, 2);
+});
+
+test('check-build: valid exits 0, invalid exits 1, usage exits 2', () => {
+  const plan = parsePlan(planText());
+  const planFile = write('plan3.md', planText());
+  const good = run('check-build.mjs', planFile, write('build-log.md', buildLogText(plan)));
+  assert.equal(good.status, 0);
+  assert.match(good.stdout, /^ok: /);
+  const bad = run('check-build.mjs', planFile, write('bad-log.md', buildLogText(plan, { 1: { Status: 'BLOCKED' } })));
+  assert.equal(bad.status, 1);
+  assert.match(bad.stdout, /^failed: /);
+  assert.equal(run('check-build.mjs', planFile).status, 2);
 });

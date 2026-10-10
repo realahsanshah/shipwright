@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseSpec, checkSpec, SPEC_SECTIONS, parsePlan, checkPlan } from '../scripts/lib/delivery-docs.mjs';
-import { specText, planText } from './helpers/delivery-fixtures.mjs';
+import { parseSpec, checkSpec, SPEC_SECTIONS, parsePlan, checkPlan, parseBuildLog, checkBuild } from '../scripts/lib/delivery-docs.mjs';
+import { specText, planText, buildLogText } from './helpers/delivery-fixtures.mjs';
 
 test('valid spec parses and passes', () => {
   const s = parseSpec(specText());
@@ -148,4 +148,66 @@ test('field keys are case-insensitive and fences are ignored', () => {
 test('plan tolerates CRLF and BOM', () => {
   const text = '\uFEFF' + planText().replace(/\n/g, '\r\n');
   assert.deepEqual(checkPlan(spec2, parsePlan(text)), []);
+});
+
+const CONTRACT_PLAN = `# Plan: HC-142 Export appointments to CSV
+
+Spec: .delivery/HC-142/spec.md (approved by Ahsan Shah on 2026-10-10)
+
+## Steps
+
+### Step 1: CSV serializer for appointments
+- Covers: AC-2, AC-5
+- Files: \`api/services/csv_export.py (new)\`
+- Test: \`api/tests/test_csv_export.py::test_columns_and_escaping\` — header row
+- Depends on: none
+`;
+const CONTRACT_LOG = `# Build log: HC-142
+
+## Step 1: CSV serializer for appointments
+- Status: DONE
+- Commit: 3f9c2ab
+- RED: \`pytest api/tests/test_csv_export.py\` — 2 failed (ImportError: csv_export)
+- GREEN: \`pytest api/tests/test_csv_export.py\` — 2 passed
+- Attempts: 1
+`;
+const plan2 = parsePlan(planText());
+const buildErrors = (overrides, text) => checkBuild(plan2, parseBuildLog(text ?? buildLogText(plan2, overrides))).join('\n');
+
+test('contract build-log template passes against its plan', () => {
+  const log = parseBuildLog(CONTRACT_LOG);
+  assert.equal(log.steps[0].status, 'DONE');
+  assert.equal(log.steps[0].attempts, 1);
+  assert.deepEqual(checkBuild(parsePlan(CONTRACT_PLAN), log), []);
+});
+
+test('valid build log passes; missing step entry fails', () => {
+  assert.equal(buildErrors({}), '');
+  const one = buildLogText(parsePlan(planText({ steps: '### Step 1: Implement AC-1\n- Covers: AC-1, AC-2\n- Files: `a.js`\n- Test: `a.test.js`\n' })));
+  assert.ok(checkBuild(plan2, parseBuildLog(one)).includes('Step 2: no entry in build log'));
+});
+
+test('status, commit, GREEN and RED rules', () => {
+  assert.match(buildErrors({ 1: { Status: 'BLOCKED' } }), /not DONE/);
+  assert.match(buildErrors({ 1: { Commit: 'abc' } }), /commit SHA/);
+  assert.match(buildErrors({ 1: { Commit: null } }), /commit SHA/);
+  assert.match(buildErrors({ 1: { GREEN: null } }), /GREEN/);
+  assert.match(buildErrors({ 1: { RED: null } }), /RED/);
+  const noTest = planText({ steps: '### Step 1: Dep\n- Covers: none\n- Files: `package.json`\n- Test: none (adds dependency)\n' });
+  const p = parsePlan(noTest);
+  assert.deepEqual(checkBuild(p, parseBuildLog(buildLogText(p, { 1: { RED: null } }))), []);
+});
+
+test('unknown and duplicate steps', () => {
+  const extra = `${buildLogText(plan2)}\n## Step 9: Ghost\n- Status: DONE\n`;
+  assert.match(buildErrors({}, extra), /not in the plan/);
+  const dupe = `${buildLogText(plan2)}\n## Step 1: Again\n- Status: DONE\n`;
+  assert.match(buildErrors({}, dupe), /more than once/);
+});
+
+test('build log keys are case-insensitive; CRLF and BOM accepted', () => {
+  const lower = buildLogText(plan2).replace(/^- Status:/gm, '- status:').replace(/^- GREEN:/gm, '- green:');
+  assert.equal(buildErrors({}, lower), '');
+  const crlf = '\uFEFF' + buildLogText(plan2).replace(/\n/g, '\r\n');
+  assert.equal(buildErrors({}, crlf), '');
 });

@@ -136,3 +136,51 @@ export function checkPlan(spec, plan) {
   for (const id of spec.acIds) if (!covered.has(id)) errors.push(`${id} is not covered by any step`);
   return errors;
 }
+
+const LOG_STEP = /^##\s+Step\s+(\d+):\s*(.*?)\s*$/;
+const LOG_FIELD = /^\s*[-*]\s+(Status|Commit|RED|GREEN|Attempts):\s*(.*?)\s*$/i;
+const SHA = /^[0-9a-f]{7,40}$/i;
+
+export function parseBuildLog(text) {
+  const steps = [];
+  let step = null;
+  let fenced = false;
+  for (const line of toLines(text)) {
+    if (FENCE.test(line)) { fenced = !fenced; continue; }
+    if (fenced) continue;
+    const heading = line.match(LOG_STEP);
+    if (heading) {
+      step = { n: Number(heading[1]), title: heading[2], status: '', commit: '', red: '', green: '', attempts: null };
+      steps.push(step);
+      continue;
+    }
+    if (/^#{1,2}\s/.test(line)) { step = null; continue; }
+    const field = step && line.match(LOG_FIELD);
+    if (!field) continue;
+    const key = field[1].toLowerCase();
+    const value = field[2];
+    if (key === 'status') step.status = value.toUpperCase();
+    else if (key === 'commit') step.commit = value.replace(/`/g, '');
+    else if (key === 'attempts') step.attempts = /^\d+$/.test(value) ? Number(value) : null;
+    else step[key] = value;
+  }
+  return { steps };
+}
+
+export function checkBuild(plan, log) {
+  const errors = [];
+  const planned = new Set(plan.steps.map((s) => s.n));
+  for (const entry of log.steps) if (!planned.has(entry.n)) errors.push(`build log has Step ${entry.n}, which is not in the plan`);
+  for (const step of plan.steps) {
+    const label = `Step ${step.n}`;
+    const entries = log.steps.filter((e) => e.n === step.n);
+    if (entries.length === 0) { errors.push(`${label}: no entry in build log`); continue; }
+    if (entries.length > 1) errors.push(`${label}: listed more than once in build log`);
+    const entry = entries[entries.length - 1];
+    if (entry.status !== 'DONE') errors.push(`${label}: status is ${entry.status || 'missing'}, not DONE`);
+    if (!SHA.test(entry.commit)) errors.push(`${label}: missing or invalid commit SHA`);
+    if (!entry.green) errors.push(`${label}: missing GREEN evidence`);
+    if (!entry.red && !NONE.test(step.test)) errors.push(`${label}: missing RED evidence (test-first)`);
+  }
+  return errors;
+}
