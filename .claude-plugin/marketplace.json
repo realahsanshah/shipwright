@@ -1,0 +1,13 @@
+{
+  "name": "shipwright",
+  "owner": { "name": "Ahsan Shah" },
+  "description": "Shipwright: ticket to production for Claude Code.",
+  "plugins": [
+    {
+      "name": "shipwright",
+      "source": "./",
+      "description": "Ticket to production: spec, plan, build, verify, review, ship, with human gates at spec, PR and release.",
+      "version": "0.3.0"
+    }
+  ]
+}
