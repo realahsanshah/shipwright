@@ -65,13 +65,13 @@ Status: draft
 
 7. **GitHub issues.** Do this only when `git remote get-url origin` contains `github.com` and `gh auth status` passes. Otherwise say the backlog stays local-only (`/shipwright:run` will feed the item text to `/intake`) and go to step 8. For each item whose line reads `Issue: none`, in backlog order:
    1. Write the issue body to a new file with a unique name in the OS temp directory, outside the repo, for example `<temp dir>/shipwright-B-<n>-issue-body.md`. It holds the title, type, dependencies, the acceptance criteria as a checklist, the open questions, and a line `Backlog: B-<n> in .delivery/backlog.md`. Write the title alone to another temp file, for example `<temp dir>/shipwright-B-<n>-issue-title.txt`. On Windows use Windows absolute paths, which Git Bash can read with `cat`.
-   2. Run `gh issue create --title "$(cat '<title file>')" --body-file <body file>`. The body goes only through `--body-file`, and document-derived text never goes directly into a shell command.
+   2. Run `gh issue create --title "$(cat '<title file>')" --body-file '<body file>'`. The body goes only through `--body-file`, and document-derived text never goes directly into a shell command.
    3. Record the result: `node "${CLAUDE_PLUGIN_ROOT}/scripts/backlog.mjs" set .delivery/backlog.md B-<n> Issue=#<number>`.
    4. Delete both temp files with `rm -f '<file>'` on every path, including failures.
 
    Never create an issue for an item whose `Issue:` is already set; that is what makes reruns safe. If creating an issue fails, stop and report: the items done so far keep their numbers, and a rerun continues with the rest.
 
-8. **Commit.** Stage `.delivery/backlog.md` by path (`git add .delivery/backlog.md`, never `git add -A`) and commit it with `chore: backlog from <docs>`, where `<docs>` is the source document names. Never push.
+8. **Commit** on the base branch (the repository's default branch, usually `main`); if another branch is checked out, tell the engineer and ask before committing. Stage `.delivery/backlog.md` by path (`git add .delivery/backlog.md`, never `git add -A`) and commit it with `chore: backlog from <docs>`, where `<docs>` is the source document names. Never push.
 
 ## Gate
 
