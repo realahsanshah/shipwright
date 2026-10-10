@@ -87,3 +87,52 @@ ${rows.join('\n')}
 ${ev.join('\n')}
 `;
 }
+
+// A passing review.md. Preamble fields take null to drop the line; `code` and `security` replace the section bodies.
+export function reviewText({ commit = '9e05129', status = 'PASS', mode = 'agents', round = 1, code, security } = {}) {
+  const head = [['Commit', commit], ['Status', status], ['Mode', mode], ['Round', round]]
+    .filter(([, v]) => v !== null).map(([k, v]) => `${k}: ${v}`).join('\n');
+  return `# Review: HC-142
+
+${head}
+
+## Code review
+
+${code ?? `Verdict: PASS
+
+- [non-blocking] api/routes/appointments.py:42 — \`rows2\` is unclear → rename to \`filtered_rows\``}
+
+## Security review
+
+${security ?? `Verdict: PASS
+
+None.`}
+`;
+}
+
+// A valid pr-description.md with one evidence row per spec AC. `rows` replaces the table rows (raw strings).
+export function prDescriptionText(spec, { title = '# Export appointments to CSV (HC-142)', closes = 'Closes: https://jira.example.com/browse/HC-142', rows } = {}) {
+  const table = rows ?? spec.acIds.map((id) => `| ${id} | \`test/${id.toLowerCase()}.test.js\` passed |`);
+  return `${title ? `${title}\n\n` : ''}${closes ? `${closes}\n\n` : ''}## Summary
+
+Admins can export the filtered appointments list as CSV.
+
+## Acceptance criteria
+
+| AC | Evidence |
+|---|---|
+${table.join('\n')}
+
+## Test plan
+
+- \`npm test\`: 56 passed
+
+## Risks
+
+None.
+
+## Notes for CLAUDE.md
+
+None.
+`;
+}

@@ -132,3 +132,49 @@ test('/verify: embedded template parses with parseVerifyReport', async () => {
   assert.ok(r.checks.find((c) => c.name === 'secret scan').command.includes('secret-scan.mjs'));
   assert.ok(r.evidence.length >= 1);
 });
+
+test('/review: entry gates, both reviewers, diff exclusion, fix loop, gate script', () => {
+  const md = read('commands/review.md');
+  for (const phrase of [
+    'check-verify.mjs', 'check-review.mjs', 'Round:', 'never reset',
+    '${CLAUDE_PLUGIN_ROOT}/agents/code-reviewer.md', '${CLAUDE_PLUGIN_ROOT}/agents/security-reviewer.md',
+    'review.md', 'pr-description.md', 'Mode: solo', 'Mode: agents',
+    ':(exclude).delivery', '--head', '3 rounds', '<id> fix:', 'Notes for CLAUDE.md',
+  ]) assert.ok(md.includes(phrase), `review.md must mention "${phrase}"`);
+  assert.match(md, /never .*conversation/i);
+  assert.match(md, /never push|do not push/i);
+});
+
+test('/review: embedded templates satisfy checkReview and checkPrDescription', async () => {
+  const { parseReview, checkReview, parsePrDescription, checkPrDescription, parseSpec } = await import('../scripts/lib/delivery-docs.mjs');
+  const { specText } = await import('./helpers/delivery-fixtures.mjs');
+  const md = read('commands/review.md');
+  const blocks = [...md.matchAll(/```markdown\r?\n([\s\S]*?)```/g)].map((m) => m[1]);
+  const rev = blocks.find((b) => b.includes('## Code review'));
+  assert.ok(rev, 'review.md must embed a review template');
+  assert.deepEqual(checkReview(parseReview(rev)), []);
+  const pr = blocks.find((b) => b.includes('Closes:'));
+  assert.ok(pr, 'review.md must embed a pr-description template');
+  const parsed = parsePrDescription(pr);
+  assert.ok(parsed.title);
+  assert.deepEqual(checkPrDescription(parseSpec(specText({ acs: ['AC-1'] })), parsed), []);
+});
+
+test('/ship: entry gate, delivery record, push, PR, CI, safety', () => {
+  const md = read('commands/ship.md');
+  for (const phrase of [
+    'check-review.mjs', ':(exclude).delivery', '--head', '<id> delivery record',
+    'git add .delivery/<id>', 'git push -u origin feat/<id>', 'gh auth status',
+    'gh pr create', '--body-file', 'gh pr edit', 'gh pr checks', 'no CI',
+    'never merge', 'deploy.yml',
+    'git diff --cached', 'symbolic-ref', 'secret-scan.mjs', 'check-ignore', 'rm -f', 'MERGED', 'CI still running', '--title "$(cat',
+  ]) assert.ok(md.includes(phrase), `ship.md must mention "${phrase}"`);
+  assert.match(md, /never force|never .*--force/i);
+});
+
+test('delivery rules: push exception for /ship; onboard gitignores .delivery/active', () => {
+  const rules = read('rules/delivery-rules.md');
+  assert.ok(rules.includes('except') && rules.includes('/ship'));
+  const onboard = read('commands/onboard.md');
+  assert.ok(onboard.includes('.delivery/active') && onboard.includes('.gitignore'));
+});

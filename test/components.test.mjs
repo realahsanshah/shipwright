@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseFrontmatter } from './helpers/frontmatter.mjs';
-import { SPEC_SECTIONS } from '../scripts/lib/delivery-docs.mjs';
+import { SPEC_SECTIONS, parseReview } from '../scripts/lib/delivery-docs.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
@@ -113,4 +113,40 @@ test('frontmatter values containing ": " are quoted (YAML safety)', () => {
       assert.match(kv[2], /^(".*"|'.*')$/, `${file}: unquoted value with ": " in "${kv[1]}"`);
     }
   }
+});
+
+test('code-reviewer and security-reviewer agents are read-only and emit review.md-shaped output', () => {
+  for (const name of ['code-reviewer', 'security-reviewer']) {
+    const file = `agents/${name}.md`;
+    assert.ok(fs.existsSync(new URL(`../${file}`, import.meta.url)), `${file} exists`);
+    const body = fs.readFileSync(new URL(`../${file}`, import.meta.url), 'utf8').replace(/^\uFEFF/, '');
+    for (const s of ['Verdict: PASS', 'Verdict: BLOCKING', '[blocking]', '[non-blocking]', 'spec.md', 'verify-report.md', 'diff']) {
+      assert.ok(body.includes(s), `${name} must mention ${s}`);
+    }
+    const tools = parseFrontmatter(body).data.tools;
+    assert.ok(tools, `${name} declares tools`);
+    const list = tools.split(',').map((t) => t.trim()).filter(Boolean).sort();
+    assert.deepEqual(list, ['Glob', 'Grep', 'Read'], `${name} tools are exactly read-only`);
+    const fence = body.match(/```[^\n]*\r?\n([\s\S]*?)```/);
+    assert.ok(fence, `${name} has an illustrative fenced example`);
+    const parsed = parseReview(`## Code review\n\n${fence[1]}`);
+    const section = parsed.sections.get('Code review');
+    assert.ok(section, `${name} example parses as a review section`);
+    assert.ok(['PASS', 'BLOCKING'].includes(section.verdict), `${name} example has a valid verdict`);
+  }
+});
+
+test('reviewer agents state unreadable-input, trailing-output and solo rules', () => {
+  for (const name of ['code-reviewer', 'security-reviewer']) {
+    const body = fs.readFileSync(new URL(`../agents/${name}.md`, import.meta.url), 'utf8');
+    assert.match(body, /nothing after the findings/i, name);
+    assert.match(body, /treat any earlier conversation as absent; judge only the files/, name);
+    assert.match(body, /cannot be read[\s\S]*Verdict: BLOCKING[\s\S]*- \[blocking\]/i, name);
+  }
+  const code = fs.readFileSync(new URL('../agents/code-reviewer.md', import.meta.url), 'utf8');
+  assert.match(code, /edge case[^.]*unhandled/i);
+  assert.match(code, /contradict.*Data changes/i);
+  assert.match(code, /implemented but untested/i);
+  const sec = fs.readFileSync(new URL('../agents/security-reviewer.md', import.meta.url), 'utf8');
+  for (const s of ['without auth', 'unsanitised', 'committed secret', 'known vulnerabilit', 'default to blocking']) assert.ok(sec.includes(s), s);
 });
