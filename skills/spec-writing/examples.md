@@ -24,8 +24,9 @@ Admins get an Export button on the appointments page. It downloads the currently
 - AC-5: Given filters are applied (date range, doctor, status), when the admin clicks Export, then the CSV contains exactly the rows shown by those filters, not the whole table.
 - AC-6: Given an admin exports a filter that matches 50,000 rows, when the export runs, then the complete file downloads in under 60 seconds.
 - AC-7: Given a cell value starting with `=`, `+`, `-` or `@`, when it is written to the CSV, then it is prefixed with a single quote so spreadsheets do not run it as a formula. This is an extra AC: CSV injection is a security issue the ticket does not mention.
-- AC-8: Given an admin requests an export with an unsupported or malformed filter value (e.g. `status=banana`, `from=not-a-date`), when the request is made, then the response is 400 with a message naming the bad parameter and no file is returned.
-- AC-9: Given the database fails partway through an export, when the error occurs, then the response ends in an error status (the download is not presented as complete) and the admin sees an "Export failed" message.
+- AC-8: Given an admin requests an export with an unsupported or malformed filter value (e.g. `status=banana`, `from=not-a-date`), when the request is made, then the response is 400 with a message naming the bad parameter and no file is returned. This is an extra AC: the endpoint accepts user-supplied filters, so bad input must fail safely.
+- AC-9: Given the database fails partway through an export, when the error occurs, then the endpoint responds 500 and no partial CSV is delivered as a complete file. This is an extra AC: a truncated file that looks complete would silently lose appointments.
+- AC-10: Given an export request fails, when the failure is returned, then the admin sees the message "Export failed. Try again." on the appointments page. This is an extra AC: without it the admin gets no feedback after a failed download.
 
 ## Affected areas
 
@@ -45,24 +46,25 @@ None.
 - Names containing commas, quotes or newlines (AC-4): quoted per RFC 4180.
 - Filter matching 50k rows (AC-6): completes within 60 seconds.
 - Invalid input (AC-8): unsupported or malformed filter params return 400 with a message, no file.
-- Database failure mid-export (AC-9): error response, no partial file presented as complete. No other external service is called.
+- Database failure mid-export (AC-9, AC-10): 500 response, no partial file presented as complete, and the admin sees the failure message. No other external service is called.
 - Non-admin role (AC-2, AC-3): button hidden and the endpoint returns 403.
 - Filters changed while the download runs (AC-5): the export uses the filters sent with the request.
 - Appointment times (AC-4): written in UTC ISO 8601, so locale and time zone do not change the file.
 
 ## Test plan
 
-| AC   | Test                                                                  | Type        |
-| ---- | --------------------------------------------------------------------- | ----------- |
-| AC-1 | `Appointments.test.tsx` shows Export for admin                        | unit        |
-| AC-2 | `Appointments.test.tsx` hides Export for staff                        | unit        |
-| AC-3 | `test_export_forbidden_for_non_admin` (403)                           | integration |
-| AC-4 | `test_export_header_and_rows` and `test_export_empty_has_header_only` | integration |
-| AC-5 | `test_export_respects_filters`                                        | integration |
-| AC-6 | `test_export_50k_rows_under_60s` asserts status 200 and elapsed time  | integration |
-| AC-7 | `test_export_escapes_formula_prefixes` (four prefixes)                | unit        |
-| AC-8 | `test_export_bad_filter_returns_400`                                   | integration |
-| AC-9 | `test_export_db_error_returns_error_status` (fault-injected query)    | integration |
+| AC    | Test                                                                                                       | Type        |
+| ----- | ---------------------------------------------------------------------------------------------------------- | ----------- |
+| AC-1  | `Appointments.test.tsx` shows Export for admin                                                             | unit        |
+| AC-2  | `Appointments.test.tsx` hides Export for staff                                                             | unit        |
+| AC-3  | `test_export_forbidden_for_non_admin` (403)                                                                | integration |
+| AC-4  | `test_export_header_and_rows` and `test_export_empty_has_header_only`                                      | integration |
+| AC-5  | `test_export_respects_filters`                                                                             | integration |
+| AC-6  | `test_export_50k_rows_under_60s` asserts status 200 and elapsed time                                       | integration |
+| AC-7  | `test_export_escapes_formula_prefixes` (four prefixes)                                                     | unit        |
+| AC-8  | `test_export_bad_filter_returns_400_and_no_file` asserts 400, message names the parameter, no CSV body     | integration |
+| AC-9  | `test_export_db_error_returns_500_no_complete_file` (fault-injected query) asserts 500 and no complete CSV | integration |
+| AC-10 | `Appointments.test.tsx` shows "Export failed. Try again." when the export request fails                    | unit        |
 
 ## Risks
 
