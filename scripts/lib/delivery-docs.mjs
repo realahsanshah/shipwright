@@ -264,6 +264,7 @@ export function checkVerify(spec, report) {
 
 export const REVIEW_SECTIONS = ['Code review', 'Security review'];
 export const PR_SECTIONS = ['Summary', 'Acceptance criteria', 'Test plan', 'Risks', 'Notes for CLAUDE.md'];
+const BLOCKING_TAG = /\[blocking\]/i;
 const FINDING = /^\s*(?:[-*+]|\d+[.)])\s+(?:\*\*)?\[(blocking|non-blocking)\](?:\*\*)?\s*(.*)$/i;
 
 function preambleField(preamble, name) {
@@ -282,21 +283,26 @@ export function sameCommit(a, b) {
 }
 
 export function parseReview(text) {
-  const { preamble, sections } = splitSections(text);
+  const { preamble, sections, order } = splitSections(text);
   const parsed = new Map();
   for (const name of REVIEW_SECTIONS) {
     if (!sections.has(name)) continue;
     let verdict = null;
+    let verdicts = 0;
+    let blockingLines = 0;
     const findings = [];
     for (const line of sections.get(name)) {
       const v = line.match(/^Verdict:\s*(\S+)\s*$/);
-      if (v && verdict === null) verdict = v[1].toUpperCase();
+      if (v) { verdicts += 1; if (verdict === null) verdict = v[1].toUpperCase(); }
       const f = line.match(FINDING);
       if (f) findings.push({ severity: f[1].toLowerCase(), text: f[2] });
+      if (BLOCKING_TAG.test(line)) blockingLines += 1;
     }
-    parsed.set(name, { verdict, findings });
+    parsed.set(name, { verdict, verdicts, findings, blockingLines });
   }
   return {
+    order,
+    anyBlocking: toLines(text).some((l) => BLOCKING_TAG.test(l)),
     commit: preambleField(preamble, 'Commit'),
     status: preambleField(preamble, 'Status'),
     mode: preambleField(preamble, 'Mode'),
@@ -312,10 +318,18 @@ export function checkReview(review) {
   if (!['agents', 'solo'].includes(review.mode)) errors.push('missing "Mode: agents" or "Mode: solo" line');
   if (!Number.isInteger(review.round) || review.round < 1) errors.push('missing "Round: N" line (N ≥ 1)');
   let allPass = true;
+  for (const name of review.order ?? []) {
+    if (!REVIEW_SECTIONS.includes(name)) { errors.push(`unexpected section "## ${name}" (only Code review and Security review are allowed)`); allPass = false; }
+  }
+  for (const name of REVIEW_SECTIONS) {
+    if ((review.order ?? []).filter((n) => n === name).length > 1) { errors.push(`section "## ${name}" appears more than once`); allPass = false; }
+  }
+  if (review.anyBlocking && review.status === 'PASS') errors.push('review says Status: PASS but the text contains a [blocking] finding');
   for (const name of REVIEW_SECTIONS) {
     const section = review.sections.get(name);
     if (!section) { errors.push(`missing section "## ${name}"`); allPass = false; continue; }
-    const blocking = section.findings.some((f) => f.severity === 'blocking');
+    const blocking = section.findings.some((f) => f.severity === 'blocking') || section.blockingLines > 0;
+    if (section.verdicts > 1) { errors.push(`${name}: more than one Verdict line`); allPass = false; }
     if (!['PASS', 'BLOCKING'].includes(section.verdict)) { errors.push(`${name}: missing "Verdict: PASS" or "Verdict: BLOCKING"`); allPass = false; continue; }
     if (section.verdict === 'PASS' && blocking) errors.push(`${name}: says PASS but has a blocking finding`);
     if (section.verdict === 'BLOCKING' && !blocking) errors.push(`${name}: says BLOCKING but lists no [blocking] finding`);
@@ -329,7 +343,8 @@ export function checkReview(review) {
 
 export function parsePrDescription(text) {
   const { preamble, sections, order } = splitSections(text);
-  const title = preamble.find((l) => /^#\s+\S/.test(l))?.replace(/^#\s+/, '').trim() ?? null;
+  const first = preamble.find((l) => l.trim() !== '');
+  const title = first && /^#\s+\S/.test(first) ? first.replace(/^#\s+/, '').trim() : null;
   const closes = preambleField(preamble, 'Closes');
   const acRows = tableRows(sections.get('Acceptance criteria') ?? []).map(([ac = '', evidence = '']) => (
     { ac: ac.replace(/[*`]/g, '').trim(), evidence }));
@@ -338,7 +353,7 @@ export function parsePrDescription(text) {
 
 export function checkPrDescription(spec, pr) {
   const errors = [];
-  if (!pr.title) errors.push('missing "# <title>" line');
+  if (!pr.title) errors.push('missing "# <title>" as the first line');
   if (!pr.closes) errors.push('missing "Closes: <ticket link>" line');
   for (const s of PR_SECTIONS) if (!pr.order.includes(s)) errors.push(`missing section "## ${s}"`);
   const known = new Set(spec.acIds);

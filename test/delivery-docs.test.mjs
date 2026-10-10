@@ -432,3 +432,22 @@ test('review: numbered and bold-tagged blocking findings under PASS fail', () =>
     assert.match(reviewErrors(text).join('\n'), /says PASS but has a blocking finding/, finding);
   }
 });
+
+test('review: extra or duplicate H2s, double verdicts and bare [blocking] lines fail', () => {
+  const extra = reviewText() + '\n## Findings\n\n- [blocking] a.js:1 — bad → fix\n';
+  assert.match(reviewErrors(extra).join('\n'), /unexpected section "## Findings"/);
+  const dupe = reviewText() + '\n## Code review\n\nVerdict: PASS\n';
+  assert.match(reviewErrors(dupe).join('\n'), /"## Code review" appears more than once/);
+  const twoVerdicts = reviewText({ code: 'Verdict: PASS\nVerdict: BLOCKING\n\n- [blocking] a.js:1 — bad → fix' });
+  assert.match(reviewErrors(twoVerdicts).join('\n'), /more than one Verdict/);
+  const bare = reviewText({ code: 'Verdict: PASS\n\nBLOCKER: [Blocking] a.js:1 — bad → fix' });
+  assert.match(reviewErrors(bare).join('\n'), /blocking/);
+  const underPreamble = reviewText().replace('Round: 1', 'Round: 1\nNote: [blocking] something');
+  assert.match(reviewErrors(underPreamble).join('\n'), /Status: PASS/);
+});
+
+test('pr-description: title must be the first non-empty line', () => {
+  const pr = prDescriptionText(spec2);
+  assert.deepEqual(prErrors(pr), []);
+  assert.match(prErrors('Intro line\n\n' + pr).join('\n'), /first/);
+});
