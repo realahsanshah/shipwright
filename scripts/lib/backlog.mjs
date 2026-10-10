@@ -8,6 +8,7 @@ const FIELD = /^\s*[-*]\s+(Type|Depends on|State|Issue|Ticket|PR|Acceptance crit
 const SUB = /^\s{2,}[-*]\s+(.*?)\s*$/;
 const APPROVED = /^Status: approved by (.+?) on (\d{4}-\d{2}-\d{2})\s*$/;
 const SETTABLE = { State: STATES, Issue: null, Ticket: null, PR: null };
+const FENCE = /^\s{0,3}(```|~~~)/;
 const TICKET_ID = /^(?!.*\.\.)[A-Za-z0-9](?:[A-Za-z0-9._-]{0,62}[A-Za-z0-9_-])?$/;
 
 export function parseBacklog(text) {
@@ -17,7 +18,10 @@ export function parseBacklog(text) {
   const items = [];
   let item = null;
   let list = null;
+  let fenced = false;
   for (const line of lines) {
+    if (FENCE.test(line)) { fenced = !fenced; continue; }
+    if (fenced) continue;
     const head = line.match(ITEM);
     if (head) {
       item = { id: head[1], n: Number(head[2]), title: head[3], type: null, dependsOn: null, state: null,
@@ -121,21 +125,34 @@ export function setFields(text, id, updates) {
     if (!Object.hasOwn(SETTABLE, field)) throw new Error(`cannot set field "${field}" (settable: ${Object.keys(SETTABLE).join(', ')})`);
     if (!validValue(field, value)) throw new Error(`invalid value for ${field}: ${JSON.stringify(value)}`);
   }
-  const eol = text.includes('\r\n') ? '\r\n' : '\n';
-  const lines = text.split(/\r?\n/);
+  // Odd indexes hold each line's own EOL, so mixed-EOL files round-trip unchanged.
+  const parts = text.split(/(\r?\n)/);
+  const canonical = new Map(Object.keys(SETTABLE).map((f) => [f.toLowerCase(), f]));
   let inItem = false;
   let found = false;
+  let list = false;
+  let fenced = false;
   const done = new Set();
-  for (let i = 0; i < lines.length; i++) {
-    const head = lines[i].match(ITEM);
-    if (head) { inItem = head[1] === id; found ||= inItem; continue; }
-    if (/^#{1,2}\s/.test(lines[i])) { inItem = false; continue; }
+  for (let i = 0; i < parts.length; i += 2) {
+    const line = parts[i];
+    if (FENCE.test(line)) { fenced = !fenced; continue; }
+    if (fenced) continue;
+    const head = line.match(ITEM);
+    if (head) { inItem = head[1] === id; found ||= inItem; list = false; continue; }
+    if (/^#{1,2}\s/.test(line)) { inItem = false; list = false; continue; }
     if (!inItem) continue;
-    const m = lines[i].match(/^(\s*[-*]\s+)(State|Issue|Ticket|PR):(\s*).*$/);
-    if (m && Object.hasOwn(updates, m[2])) { lines[i] = `${m[1]}${m[2]}: ${updates[m[2]]}`; done.add(m[2]); }
+    if (list && SUB.test(line)) continue;
+    const field = line.match(FIELD);
+    if (!field) continue;
+    list = /^(acceptance criteria|open questions)$/i.test(field[1]);
+    const name = canonical.get(field[1].toLowerCase());
+    if (!name || !Object.hasOwn(updates, name) || done.has(name)) continue;
+    const m = line.match(/^(\s*[-*]\s+)([^:]+):/);
+    parts[i] = `${m[1]}${m[2]}: ${updates[name]}`;
+    done.add(name);
   }
   if (!found) throw new Error(`no item ${id} in backlog`);
   const missing = Object.keys(updates).filter((f) => !done.has(f));
   if (missing.length) throw new Error(`${id} has no "- ${missing[0]}:" line to update`);
-  return lines.join(eol);
+  return parts.join('');
 }

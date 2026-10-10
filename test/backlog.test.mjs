@@ -153,3 +153,41 @@ test('CLI: set writes the file; invalid input exits 2', () => {
   assert.equal(run('set', f, 'B-1', 'Title=x').status, 2);
   assert.equal(run('set', f, 'B-1').status, 2);
 });
+
+test('check: a three-item cycle is reported with its path', () => {
+  const extra = '\n## B-3: Third\n- Type: chore\n- Depends on: B-2\n- State: todo\n- Issue: none\n- Ticket: none\n- PR: none\n- Acceptance criteria:\n  - x\n- Open questions:\n  - None.\n';
+  const t = template.replace('Depends on: none', 'Depends on: B-3') + extra;
+  const errors = check(t);
+  assert.ok(errors.some((e) => /cycle: .*B-1.*B-3.*B-2.*B-1|cycle: .*B-\d → B-\d → B-\d → B-\d/.test(e)), errors.join('\n'));
+});
+
+test('setFields: field-like criterion and question text is never rewritten', () => {
+  const t = template
+    .replace('- Acceptance criteria:\n', '- Acceptance criteria:\n  - State: done is shown on the dashboard\n  - PR: links open in a new tab\n')
+    .replace('- Open questions:\n  - None.', '- Open questions:\n  - Issue: who owns this?');
+  const out = setFields(t, 'B-1', { State: 'in-progress', PR: 'https://github.com/o/r/pull/9', Issue: '#5' });
+  assert.match(out, /^ {2}- State: done is shown on the dashboard$/m);
+  assert.match(out, /^ {2}- PR: links open in a new tab$/m);
+  assert.match(out, /^ {2}- Issue: who owns this\?$/m);
+  const one = parseBacklog(out).items[0];
+  assert.deepEqual([one.state, one.pr, one.issue], ['in-progress', 'https://github.com/o/r/pull/9', '#5']);
+});
+
+test('setFields: matches field names case-insensitively, keeps mixed EOLs', () => {
+  const lower = template.replace(/(## B-1[\s\S]*?)- State: todo/, '$1- state: todo');
+  assert.equal(parseBacklog(setFields(lower, 'B-1', { State: 'done' })).items[0].state, 'done');
+  const mixed = template.split('\n').map((l, i) => l + (i % 2 ? '\r\n' : '\n')).join('').replace(/\r?\n$/, '');
+  const out = setFields(mixed, 'B-1', { State: 'done' });
+  assert.equal(out.match(/\r\n/g).length, mixed.match(/\r\n/g).length);
+  assert.equal(out.replace(/\r/g, '').split('\n').length, mixed.replace(/\r/g, '').split('\n').length);
+});
+
+test('fenced code blocks are ignored by the parser and setFields', () => {
+  const fence = '\n```md\n## B-7: Example in a fence\n- State: todo\n```\n';
+  const t = template.replace('## B-2', `${fence}\n## B-2`);
+  const b = parseBacklog(t);
+  assert.deepEqual(b.items.map((i) => i.id), ['B-1', 'B-2']);
+  assert.throws(() => setFields(t, 'B-7', { State: 'done' }), /no item B-7/);
+  const out = setFields(t, 'B-1', { State: 'done' });
+  assert.ok(out.includes(fence));
+});
