@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { checkFile, checkCommand, decide, readDangerZones } from '../hooks/pre-tool-guard.mjs';
+import { checkFile, checkCommand, checkShellSecrets, decide, readDangerZones, isSecretPath } from '../hooks/pre-tool-guard.mjs';
 
 const hook = fileURLToPath(new URL('../hooks/pre-tool-guard.mjs', import.meta.url));
 const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'Ahsan Shah Workspace proj '));
@@ -101,4 +101,70 @@ test('malformed or empty stdin is a non-blocking error (exit 1), never exit 2', 
     assert.equal(r.status, 1);
     assert.match(r.stderr, /pre-tool-guard: could not parse hook input/);
   }
+});
+
+test('.env* variants blocked; example/sample/template suffixes allowed; secrets dir still blocked', () => {
+  for (const name of ['.envrc', '.env-prod', '.env_local']) {
+    assert.match(checkFile('Read', path.join(proj, name), proj) ?? '', /secret/, name);
+  }
+  for (const name of ['.env.local.example', '.env.production.sample']) {
+    assert.equal(checkFile('Read', path.join(proj, name), proj), null, `Read ${name}`);
+    assert.equal(checkFile('Edit', path.join(proj, name), proj), null, `Edit ${name}`);
+  }
+  assert.match(checkFile('Read', path.join(proj, 'secrets', '.env.example'), proj) ?? '', /secret/);
+});
+
+test('Windows credential stores and AWS SSO cache blocked', () => {
+  for (const p of [
+    path.join(os.homedir(), 'AppData', 'Roaming', 'gcloud', 'credentials.db'),
+    path.join(os.homedir(), '.aws', 'sso', 'cache', 'abc.json'),
+  ]) {
+    assert.match(checkFile('Read', p, proj) ?? '', /secret/, p);
+    assert.equal(isSecretPath(p, proj), true, p);
+  }
+});
+
+test('Grep blocked on secret path or secret glob, allowed otherwise', () => {
+  assert.match(decide({ tool_name: 'Grep', tool_input: { pattern: 'KEY', path: path.join(proj, '.env') } }, proj) ?? '', /secret/);
+  assert.equal(decide({ tool_name: 'Grep', tool_input: { pattern: 'x', path: 'src', glob: '*.ts' } }, proj), null);
+  assert.match(decide({ tool_name: 'Grep', tool_input: { pattern: 'x', glob: '.env*' } }, proj) ?? '', /secret/);
+  assert.match(decide({ tool_name: 'Grep', tool_input: { pattern: 'x', glob: '*.pem' } }, proj) ?? '', /secret/);
+  assert.equal(decide({ tool_name: 'Grep', tool_input: { pattern: 'x' } }, proj), null);
+});
+
+test('checkShellSecrets blocks secret file references, allows examples and commit messages', () => {
+  for (const c of [
+    'cat .env', 'type .env.local', 'Get-Content secrets/db.json', 'grep KEY .env',
+    'docker run --env-file=.env app', 'cat ~/.aws/credentials', 'cp .env.example .env', 'cat ".env"',
+  ]) {
+    assert.match(checkShellSecrets(c, proj) ?? '', /secret file/, c);
+  }
+  for (const c of [
+    'cat .env.example', 'git commit -m "ignore .env files"', 'git commit -m .env',
+    'echo "the .env file"', 'npm test', 'ls src',
+  ]) {
+    assert.equal(checkShellSecrets(c, proj), null, c);
+  }
+  assert.match(decide({ tool_name: 'Bash', tool_input: { command: 'cat .env' } }, proj) ?? '', /secret file/);
+});
+
+test('wrapped, prefixed and quoted destructive commands blocked', () => {
+  for (const c of [
+    'bash -c "git push --force"', "sh -c 'terraform destroy'", 'echo `git push -f`', '{ git push -f; }',
+    'if true; then git push -f; fi', 'FOO=1 git push -f', 'sudo git push --force', 'git -C repo push --force',
+    'git -c a=b push -f', 'git.exe push --force', 'git push -uf origin x', 'git push origin +main',
+    'sudo terraform destroy',
+  ]) assert.ok(checkCommand(c), c);
+});
+
+test('safe git and shell lookalikes still allowed after hardening', () => {
+  for (const c of ['git push -u origin main', 'git push origin main', 'git -C repo push', 'git -C repo status']) {
+    assert.equal(checkCommand(c), null, c);
+  }
+});
+
+test('stdin that is valid JSON but not an object is non-blocking (exit 1)', () => {
+  const r = runHook('null');
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /could not parse hook input/);
 });

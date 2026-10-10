@@ -1,31 +1,47 @@
 #!/usr/bin/env node
-// PreToolUse guard: blocks secret files (read or write), edits to the project's
-// danger zones, and destructive commands. Exit 2 blocks; stderr is the reason.
+// PreToolUse guard: blocks secret files (read or write, via file tools, Grep and shell
+// commands), edits to the project's danger zones, and destructive commands.
+// Exit 2 blocks; stderr is the reason. Exit 1 is a non-blocking internal error.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { toPosix, projectRelative, matchesAny } from './lib/paths.mjs';
 
+// Env files: any `.env*` name is secret unless it is a committed template.
+export const ENV_GLOBS = ['**/.env*'];
+export const ENV_EXCEPTIONS = ['**/.env*.example', '**/.env*.sample', '**/.env*.template'];
+
+// Never exempted.
 export const SECRET_GLOBS = [
-  '**/.env', '**/.env.*', '**/*.pem', '**/*.key', '**/*.p12', '**/*.pfx',
+  '**/*.pem', '**/*.key', '**/*.p12', '**/*.pfx',
   '**/secrets/**', '**/*.tfstate', '**/*.tfstate.backup',
-  '**/.aws/credentials', '**/.config/gcloud/**', '**/.azure/**', '**/.kube/config',
+  '**/.aws/credentials', '**/.aws/sso/cache/**',
+  '**/.config/gcloud/**', '**/AppData/Roaming/gcloud/**',
+  '**/.azure/**', '**/.kube/config',
 ];
-// Committed templates with no values; /onboard reads them to learn required env vars.
-export const SECRET_EXCEPTIONS = ['**/.env.example', '**/.env.sample', '**/.env.template'];
 
 const FILE_TOOLS = new Set(['Read', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const WRITE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
 
-// Each pattern is anchored to the start of a shell segment so quoted mentions in echo/notes pass.
-const SEGMENT_START = String.raw`(?:^|[;&|\n(]\s*)`;
+// A destructive command must start a shell segment: after a separator, an opening
+// bracket or quote, a keyword, then optional env assignments and sudo/env wrappers.
+const CMD_PREFIX = String.raw`(?:^|[;&|\n(\x60'"{]\s*|\b(?:then|do|else)\s+)(?:(?:sudo|env)\s+|[A-Za-z_]\w*=\S*\s+)*`;
+const GIT = String.raw`git(?:\.exe)?\s+(?:(?:-C|-c)\s+\S+\s+|--git-dir=\S+\s+|--work-tree=\S+\s+)*`;
+const TERRAFORM = String.raw`terraform(?:\.exe)?\s+`;
 const DANGEROUS_COMMANDS = [
-  { rule: 'git push --force', pattern: new RegExp(`${SEGMENT_START}git\\s+push\\b[^;&|\\n]*\\s(?:--force(?![-\\w])|-f\\b)`) },
-  { rule: 'terraform destroy', pattern: new RegExp(`${SEGMENT_START}terraform\\s+(?:-chdir=\\S+\\s+)?destroy\\b`) },
-  { rule: 'terraform apply -destroy', pattern: new RegExp(`${SEGMENT_START}terraform\\s+(?:-chdir=\\S+\\s+)?apply\\b[^;&|\\n]*\\s-destroy\\b`) },
-  { rule: 'kubectl delete namespace', pattern: new RegExp(`${SEGMENT_START}kubectl\\b[^;&|\\n]*\\sdelete\\s+(?:namespaces?|ns)\\b`) },
+  {
+    rule: 'git push --force',
+    pattern: new RegExp(`${CMD_PREFIX}${GIT}push\\b[^;&|\\n]*(?:\\s--force(?![-\\w])|\\s-[a-zA-Z]*f[a-zA-Z]*\\b|\\s\\+\\S)`),
+  },
+  { rule: 'terraform destroy', pattern: new RegExp(`${CMD_PREFIX}${TERRAFORM}(?:-chdir=\\S+\\s+)?destroy\\b`) },
+  { rule: 'terraform apply -destroy', pattern: new RegExp(`${CMD_PREFIX}${TERRAFORM}(?:-chdir=\\S+\\s+)?apply\\b[^;&|\\n]*\\s-destroy\\b`) },
+  { rule: 'kubectl delete namespace', pattern: new RegExp(`${CMD_PREFIX}kubectl(?:\\.exe)?\\b[^;&|\\n]*\\sdelete\\s+(?:namespaces?|ns)\\b`) },
 ];
+
+// Tokens: double-quoted, single-quoted, or bare. The matched group decides the value.
+const TOKEN = /"([^"]*)"|'([^']*)'|([^\s;|&<>()`"']+)/g;
 
 export function readDangerZones(projectDir) {
   let text;
@@ -49,11 +65,19 @@ export function readDangerZones(projectDir) {
   return zones;
 }
 
+// True when a path (relative to projectDir, or absolute) is a secret file.
+export function isSecretPath(p, projectDir) {
+  const abs = toPosix(path.resolve(projectDir, p));
+  if (matchesAny(abs, SECRET_GLOBS)) return true;
+  return matchesAny(abs, ENV_GLOBS) && !matchesAny(abs, ENV_EXCEPTIONS);
+}
+
+const SECRET_REASON = 'secret files are never read or edited by Claude. '
+  + 'Work with a reference (e.g. account_ref) and let scripts or CI resolve the value.';
+
 export function checkFile(toolName, filePath, projectDir) {
-  const abs = toPosix(path.resolve(projectDir, filePath));
-  if (matchesAny(abs, SECRET_GLOBS) && !matchesAny(abs, SECRET_EXCEPTIONS)) {
-    return `${toolName} on ${filePath} blocked: secret files are never read or edited by Claude. `
-      + 'Work with a reference (e.g. account_ref) and let scripts or CI resolve the value.';
+  if (isSecretPath(filePath, projectDir)) {
+    return `${toolName} on ${filePath} blocked: ${SECRET_REASON}`;
   }
   if (!WRITE_TOOLS.has(toolName)) return null;
   const rel = projectRelative(filePath, projectDir);
@@ -69,6 +93,46 @@ export function checkCommand(command) {
   return hit ? `Command blocked: \`${hit.rule}\` is never run by Claude in this kit. If it is really needed, the engineer runs it.` : null;
 }
 
+// Shell commands that name a secret file as an argument (cat .env, cp .env.example .env, ...).
+export function checkShellSecrets(command, projectDir) {
+  const tokens = [];
+  for (const m of command.matchAll(TOKEN)) tokens.push(m[1] ?? m[2] ?? m[3]);
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (t === '-m' || t === '--message') {
+      i++; // the next token is a commit message, not a path
+      continue;
+    }
+    let candidate = t;
+    if (t.startsWith('-')) {
+      const eq = t.indexOf('=');
+      if (eq === -1) continue;
+      candidate = t.slice(eq + 1);
+    }
+    if (!candidate) continue;
+    const p = candidate.startsWith('~/') ? path.join(os.homedir(), candidate.slice(2)) : candidate;
+    if (isSecretPath(p, projectDir)) {
+      return `Command blocked: it references secret file ${candidate}. `
+        + 'Claude never reads secret values; work with references (account_ref) instead.';
+    }
+  }
+  return null;
+}
+
+// Grep: block a secret target path, or a glob that would match secret files.
+// Each `*` is replaced with `x` so `.env*` tests as `.envx` and `*.pem` as `x.pem`.
+function checkGrep(toolInput, projectDir) {
+  const p = toolInput.path;
+  if (typeof p === 'string' && p && isSecretPath(p, projectDir)) {
+    return `Grep on ${p} blocked: ${SECRET_REASON}`;
+  }
+  const g = toolInput.glob;
+  if (typeof g === 'string' && g && isSecretPath(g.replace(/\*/g, 'x'), projectDir)) {
+    return `Grep with glob ${g} blocked: ${SECRET_REASON}`;
+  }
+  return null;
+}
+
 export function decide(input, projectDir) {
   const tool = input.tool_name;
   const toolInput = input.tool_input ?? {};
@@ -76,7 +140,10 @@ export function decide(input, projectDir) {
     const p = toolInput.file_path ?? toolInput.notebook_path;
     return typeof p === 'string' && p ? checkFile(tool, p, projectDir) : null;
   }
-  if (SHELL_TOOLS.has(tool) && typeof toolInput.command === 'string') return checkCommand(toolInput.command);
+  if (tool === 'Grep') return checkGrep(toolInput, projectDir);
+  if (SHELL_TOOLS.has(tool) && typeof toolInput.command === 'string') {
+    return checkCommand(toolInput.command) ?? checkShellSecrets(toolInput.command, projectDir);
+  }
   return null;
 }
 
@@ -84,13 +151,22 @@ function main() {
   let input;
   try {
     input = JSON.parse(fs.readFileSync(0, 'utf8'));
+    if (input === null || typeof input !== 'object' || Array.isArray(input)) {
+      throw new Error('expected a JSON object');
+    }
   } catch (err) {
     // Exit 1 is non-blocking: a broken guard must not brick the session.
     process.stderr.write(`pre-tool-guard: could not parse hook input (${err.message}); allowing the call.\n`);
     process.exit(1);
   }
-  const projectDir = process.env.CLAUDE_PROJECT_DIR || input.cwd || process.cwd();
-  const reason = decide(input, projectDir);
+  let reason;
+  try {
+    const projectDir = process.env.CLAUDE_PROJECT_DIR || input.cwd || process.cwd();
+    reason = decide(input, projectDir);
+  } catch (err) {
+    process.stderr.write(`pre-tool-guard: internal error (${err.message}); allowing the call.\n`);
+    process.exit(1);
+  }
   if (reason) {
     process.stderr.write(`${reason}\n`);
     process.exit(2);
@@ -98,4 +174,12 @@ function main() {
   process.exit(0);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) main();
+function isMain() {
+  try {
+    return fs.realpathSync(fileURLToPath(import.meta.url)) === fs.realpathSync(process.argv[1]);
+  } catch {
+    return false;
+  }
+}
+
+if (isMain()) main();
