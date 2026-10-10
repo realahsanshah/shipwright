@@ -46,3 +46,33 @@ test('/spec: reads ticket, uses skill + critic in both modes, human approval gat
   assert.match(md, /3 (rounds|attempts|times)/);
   assert.match(md, /never (mark|approve).*(yourself|itself)|only the engineer/i);
 });
+
+test('/plan: entry gate, planner in both modes, test-strategy, check-plan gate', () => {
+  const md = read('commands/plan.md');
+  for (const phrase of [
+    '.delivery/active',
+    'node "${CLAUDE_PLUGIN_ROOT}/scripts/check-spec.mjs"',
+    'node "${CLAUDE_PLUGIN_ROOT}/scripts/check-plan.mjs"',
+    'plan.md',
+    '${CLAUDE_PLUGIN_ROOT}/agents/planner.md',
+    'test-strategy',
+    'mode: solo',
+    '.delivery/config.yml',
+    'Spec:',
+    '3 attempts',
+  ]) assert.ok(md.includes(phrase), `plan.md must mention "${phrase}"`);
+});
+
+test('/plan: embedded template parses with parsePlan', async () => {
+  const { parsePlan } = await import('../scripts/lib/delivery-docs.mjs');
+  const md = read('commands/plan.md');
+  const m = md.match(/```markdown\r?\n([\s\S]*?)```/);
+  assert.ok(m, 'plan.md must contain a ```markdown block');
+  const plan = parsePlan(m[1]);
+  assert.ok(plan.steps.length >= 2);
+  for (const s of plan.steps) {
+    assert.notEqual(s.covers, null);
+    assert.ok(s.files.length > 0);
+    assert.ok(s.test && s.test.length > 0);
+  }
+});
