@@ -13,11 +13,13 @@ Only the engineer approves a spec. You must never mark the spec approved yoursel
 
 ## Steps
 
-1. **Resolve the ticket id.** Use `$ARGUMENTS` if it is given. Otherwise read `.delivery/active` and use the id on its first line. If the id came from `$ARGUMENTS`, reject it unless it contains only letters, digits, `.`, `_` and `-`, with no `/` and no `..`; stop with a message saying so. Then run `node "${CLAUDE_PLUGIN_ROOT}/scripts/validate.mjs" ticket .delivery/<id>/ticket.json`. If a file is missing or the validator exits non-zero, stop and tell the engineer to run `/intake` first. Only then use the ticket.
+1. **Resolve the ticket id.** Use `$ARGUMENTS` if it is given. Otherwise read `.delivery/active` and use the id on its first line. Whichever source it came from, reject the id unless it contains only letters, digits, `.`, `_` and `-`, with no `/` and no `..`; stop with a message saying so. Then run `node "${CLAUDE_PLUGIN_ROOT}/scripts/validate.mjs" ticket .delivery/<id>/ticket.json`. If a file is missing or the validator exits non-zero, stop and tell the engineer to run `/intake` first. Only then use the ticket.
+
+   Then, before any write to `spec.md` (the step 2 bounce included): if `.delivery/<id>/spec.md` exists with a `Status: approved by` line, tell the engineer that rerunning `/spec` rewrites it as `Status: draft` and needs critic review and approval again, and ask before overwriting it. If they say no, stop with no changes.
 
 2. **Pre-check (the bounce).** If `open_questions` in `ticket.json` is non-empty, or the ticket needs a product decision (a choice about behaviour, scope or design that only the ticket author can make), do not guess. Write `.delivery/<id>/spec.md` with `Status: draft` whose `## Open questions` section lists those questions, addressed to the ticket author. Then FAIL the gate (see `## Gate`) and stop. The engineer takes the questions back to the author and reruns `/intake` and `/spec` once they are answered.
 
-3. **Write the spec.** Follow the `spec-writing` skill at `${CLAUDE_PLUGIN_ROOT}/skills/spec-writing/SKILL.md`. Read the project `CLAUDE.md` and the code the change touches first, so that `## Affected areas` names real files, modules and endpoints. Mark anything that does not exist yet with "(new)". Write `.delivery/<id>/spec.md` starting with `Status: draft`. If `spec.md` already exists with an approved `Status:` line, rerunning `/spec` rewrites it as `Status: draft` and it needs critic review and approval again, so ask the engineer before overwriting it.
+3. **Write the spec.** Follow the `spec-writing` skill at `${CLAUDE_PLUGIN_ROOT}/skills/spec-writing/SKILL.md`. Read the project `CLAUDE.md` and the code the change touches first, so that `## Affected areas` names real files, modules and endpoints. Mark anything that does not exist yet with "(new)". Write `.delivery/<id>/spec.md` starting with `Status: draft`.
 
 4. **Critic loop.** Read the mode from `.delivery/config.yml`. A missing file, or a file with no `mode:` line, means `mode: auto`.
    - `mode: solo` means solo. `mode: agents` means agents.
@@ -32,7 +34,7 @@ Only the engineer approves a spec. You must never mark the spec approved yoursel
 
 5. **Human gate.** Present to the engineer: the summary, the numbered ACs, the edge cases, and the critic verdict. Ask them to approve or edit. Wait for their answer. Never request or record approval while the latest critic verdict is `Verdict: GAPS`.
    - Approve (the change to the `Status:` line is not an edit that resets approval): run `git config user.name`, show the name, and ask the engineer to confirm it (or give a different one). Then change the first line after the title to `Status: approved by <name> on <YYYY-MM-DD>`, using today's date. If `git config user.name` is empty, ask for the name.
-   - Edit: apply the engineer's changes to `spec.md` and re-run the critic once on the edited version, saving the report to `spec-review.md`. Show the result and ask again. If the report is `Verdict: GAPS`, show the findings and let the engineer decide whether to fix them or stop.
+   - Edit: apply the engineer's changes to `spec.md` and re-run the critic on the edited version, saving the report to `spec-review.md`. On `Verdict: PASS`, ask for approval again. On `Verdict: GAPS`, show the findings and do not ask for approval: the engineer fixes them (another critic round, still within the 3-round cap) or stops, and a stop FAILs the gate.
    - Reject, or no clear answer: leave `Status: draft` and FAIL the gate with the engineer's reason.
    - Any change to `spec.md` after approval resets the `Status:` line to `Status: draft`. It must be re-reviewed by the critic and approved again before `/plan` may run.
 
