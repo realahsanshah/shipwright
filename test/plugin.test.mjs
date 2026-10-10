@@ -29,9 +29,33 @@ test('parseFrontmatter reads key/value pairs and body, LF or CRLF', () => {
 });
 
 const hasClaude = spawnSync('claude', ['--version'], { shell: true }).status === 0;
-test('claude plugin validate passes', { skip: !hasClaude && 'claude CLI not installed' }, () => {
-  const r = spawnSync('claude', ['plugin', 'validate', '.'], {
+test('claude plugin validate: no errors or unexpected warnings', { skip: !hasClaude && 'claude CLI not installed' }, () => {
+  const r = spawnSync('claude', ['plugin', 'validate', '.', '--json'], {
     cwd: new URL('..', import.meta.url), shell: true, encoding: 'utf8',
   });
-  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const result = JSON.parse(r.stdout);
+
+  assert.equal(result.success, true, `Validation failed: ${JSON.stringify(result)}`);
+
+  // Check manifest for errors and unexpected warnings
+  if (result.manifest) {
+    const errors = result.manifest.errors || [];
+    const warnings = (result.manifest.warnings || []).filter(
+      w => !w.message.startsWith('CLAUDE.md at the plugin root is not loaded as project context')
+    );
+    assert.equal(errors.length, 0, `Manifest errors: ${JSON.stringify(errors)}`);
+    assert.equal(warnings.length, 0, `Unexpected manifest warnings: ${JSON.stringify(warnings)}`);
+  }
+
+  // Check contents entries for errors and unexpected warnings
+  if (result.contents && Array.isArray(result.contents)) {
+    for (const entry of result.contents) {
+      const errors = entry.errors || [];
+      const warnings = (entry.warnings || []).filter(
+        w => !w.message.startsWith('CLAUDE.md at the plugin root is not loaded as project context')
+      );
+      assert.equal(errors.length, 0, `Errors in ${entry.file}: ${JSON.stringify(errors)}`);
+      assert.equal(warnings.length, 0, `Unexpected warnings in ${entry.file}: ${JSON.stringify(warnings)}`);
+    }
+  }
 });
