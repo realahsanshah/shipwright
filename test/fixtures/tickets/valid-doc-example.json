@@ -1,0 +1,18 @@
+{
+  "id": "HC-142",
+  "source": "jira",
+  "flow": "task",
+  "type": "feature",
+  "repo": "git@github.com:client/portal.git",
+  "base_branch": "develop",
+  "title": "Export appointments to CSV",
+  "description": "...",
+  "acceptance_criteria": [
+    "Admin sees Export on the appointments page",
+    "CSV contains date, patient, doctor, status",
+    "Export respects the current filters"
+  ],
+  "constraints": ["No new dependencies"],
+  "deploy": { "target": "azure-app-service", "env": "staging" },
+  "open_questions": []
+}
