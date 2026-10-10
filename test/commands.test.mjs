@@ -103,3 +103,32 @@ test('/build: embedded template parses with parseBuildLog', async () => {
   assert.ok(s.red);
   assert.ok(s.green);
 });
+
+test('/verify: report format, checks, scanners, gate script, fix loop', async () => {
+  const { REQUIRED_CHECKS } = await import('../scripts/lib/delivery-docs.mjs');
+  const md = read('commands/verify.md');
+  for (const phrase of [
+    'verify-report.md', 'Status: PASS', 'Status: FAIL', 'Attempts:', 'Commit:',
+    '## Checks', '## Acceptance criteria evidence',
+    ...REQUIRED_CHECKS,
+    'node "${CLAUDE_PLUGIN_ROOT}/scripts/secret-scan.mjs"', 'gitleaks',
+    'node "${CLAUDE_PLUGIN_ROOT}/scripts/check-verify.mjs"',
+    'npm audit', 'pip-audit', 'coverage', 'git worktree',
+    '<id> fix:', '3 attempts', 'stop-gate',
+  ]) assert.ok(md.includes(phrase), `verify.md must mention "${phrase}"`);
+  assert.match(md, /never push|do not push/i);
+});
+
+test('/verify: embedded template parses with parseVerifyReport', async () => {
+  const { parseVerifyReport, REQUIRED_CHECKS } = await import('../scripts/lib/delivery-docs.mjs');
+  const md = read('commands/verify.md');
+  const m = md.match(/```markdown\r?\n([\s\S]*?)```/);
+  assert.ok(m, 'verify.md must contain a ```markdown block');
+  const r = parseVerifyReport(m[1]);
+  assert.equal(r.status, 'PASS');
+  assert.equal(r.attempts, 1);
+  for (const c of REQUIRED_CHECKS) {
+    assert.ok(JSON.stringify(r).toLowerCase().includes(c), `template must include check ${c}`);
+  }
+  assert.ok(r.evidence.length >= 1);
+});
