@@ -21,12 +21,13 @@ Report each problem under the category in brackets.
 - [ambiguous] A vague term ("properly", "user-friendly", "fast") has no definition.
 - [unmapped-criterion] A ticket criterion has no AC, or an AC has no test-plan entry.
 - [missing-edge-case] The edge-case checklist in `${CLAUDE_PLUGIN_ROOT}/skills/spec-writing/SKILL.md` is not covered and not dismissed with a reason.
-- [scope] The spec goes beyond the ticket, breaks a `constraints` entry, or lists affected areas that do not exist in the repo.
+- [scope] The spec goes beyond the ticket, breaks a `constraints` entry, lists an existing path that does not exist in the repo, or lists a new file or endpoint without marking it "(new)".
 - [product-decision] The spec makes a choice only the product owner can make, or leaves one unasked.
+- [open-question] Anything under `## Open questions` other than exactly `None.` is a finding, and forces `Verdict: GAPS`.
 
 ## Output format
 
-Reply with exactly this shape and nothing before it. The first line is `Verdict: PASS` or `Verdict: GAPS`.
+Reply with exactly this shape and nothing before it. The fenced blocks below are illustrations: do not emit the code fences themselves. The first line is `Verdict: PASS` or `Verdict: GAPS`.
 
 ```
 Verdict: GAPS
@@ -45,11 +46,11 @@ Verdict: PASS
 None.
 ```
 
-Format of each finding: `- [<category>] <location>: <problem> → <suggested fix>`. Categories: [untestable], [ambiguous], [missing-edge-case], [unmapped-criterion], [scope], [product-decision], [missing-section].
+Format of each finding: `- [<category>] <location>: <problem> → <suggested fix>`. Categories: [untestable], [ambiguous], [missing-edge-case], [unmapped-criterion], [scope], [product-decision], [missing-section], [open-question].
 
 ## Rules
 
 - Never edit or write files. Return the report only.
 - Every finding cites an AC number or a section heading as its location.
-- `Verdict: GAPS` requires at least one finding; `Verdict: PASS` has none.
+- `Verdict: GAPS` requires at least one finding; `Verdict: PASS` has none. Any open question forces GAPS.
 - Style nits and wording preferences are not findings.

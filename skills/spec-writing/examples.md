@@ -17,17 +17,19 @@ Admins get an Export button on the appointments page. It downloads the currently
 
 ## Acceptance criteria
 
-- AC-1: Given an admin on the appointments page, when the page loads, then an Export button is visible. Non-admin roles do not see it.
-- AC-2: Given an admin clicks Export, when the download finishes, then the CSV has the header `date,patient,doctor,status` and one row per appointment.
-- AC-3: Given filters are applied (date range, doctor, status), when the admin clicks Export, then the CSV contains exactly the rows shown by those filters, not the whole table.
-- AC-4: Given an admin exports a filter that matches 50,000 rows, when the export runs, then the file is delivered without a request timeout and the server streams rows instead of loading them all into memory.
-- AC-5 (extra, reason: CSV injection is a security issue the ticket does not mention): Given a cell value starting with `=`, `+`, `-` or `@`, when it is written to the CSV, then it is prefixed with a single quote so spreadsheets do not run it as a formula.
+- AC-1: Given an admin on the appointments page, when the page loads, then an Export button is visible.
+- AC-2: Given a non-admin user on the appointments page, when the page loads, then no Export button is visible.
+- AC-3: Given a non-admin user, when they request `GET /appointments/export` directly, then the response is 403.
+- AC-4: Given an admin clicks Export, when the download finishes, then the CSV has the header `date,patient,doctor,status` and one row per appointment.
+- AC-5: Given filters are applied (date range, doctor, status), when the admin clicks Export, then the CSV contains exactly the rows shown by those filters, not the whole table.
+- AC-6: Given an admin exports a filter that matches 50,000 rows, when the export runs, then the complete file downloads in under 60 seconds.
+- AC-7: Given a cell value starting with `=`, `+`, `-` or `@`, when it is written to the CSV, then it is prefixed with a single quote so spreadsheets do not run it as a formula. This is an extra AC: CSV injection is a security issue the ticket does not mention.
 
 ## Affected areas
 
 - `web/src/pages/Appointments.tsx`: add the Export button, role-gated.
-- `api/routes/appointments.py`: new `GET /appointments/export` taking the same query params as the list endpoint.
-- `api/services/csv_export.py`: new module using the standard library `csv` writer.
+- `api/routes/appointments.py`: add `GET /appointments/export` (new endpoint) taking the same query params as the list endpoint.
+- `api/services/csv_export.py` (new): module using the standard library `csv` writer.
 
 ## Data changes and migrations
 
@@ -35,24 +37,25 @@ None.
 
 ## Edge cases
 
-- Empty result set (AC-2): file has only the header row, status 200, no error.
-- Cells starting with `=`, `+`, `-`, `@` (AC-5): escaped as described.
-- Names containing commas, quotes or newlines (AC-2): quoted per RFC 4180.
-- Filter matching 50k rows (AC-4): streamed response, memory stays flat.
-- Non-admin role (AC-1): button hidden and the endpoint returns 403.
-- Filters changed while the download runs (AC-3): the export uses the filters sent with the request.
-- Appointment times (AC-2): written in UTC ISO 8601, so locale and time zone do not change the file.
+- Empty result set (AC-4): file has only the header row, status 200, no error.
+- Cells starting with `=`, `+`, `-`, `@` (AC-7): escaped as described.
+- Names containing commas, quotes or newlines (AC-4): quoted per RFC 4180.
+- Filter matching 50k rows (AC-6): completes within the time limit.
+- Non-admin role (AC-2, AC-3): button hidden and the endpoint returns 403.
+- Filters changed while the download runs (AC-5): the export uses the filters sent with the request.
+- Appointment times (AC-4): written in UTC ISO 8601, so locale and time zone do not change the file.
 
 ## Test plan
 
 | AC   | Test                                                                  | Type        |
 | ---- | --------------------------------------------------------------------- | ----------- |
-| AC-1 | `Appointments.test.tsx` shows Export for admin, hides it for staff    | unit        |
-| AC-2 | `test_export_header_and_rows` and `test_export_empty_has_header_only` | integration |
-| AC-3 | `test_export_respects_filters`                                        | integration |
-| AC-4 | `test_export_50k_rows_streams` asserts peak memory and status 200     | integration |
-| AC-5 | `test_export_escapes_formula_prefixes` (four prefixes)                | unit        |
-| AC-1 | `test_export_forbidden_for_non_admin` (403)                           | integration |
+| AC-1 | `Appointments.test.tsx` shows Export for admin                        | unit        |
+| AC-2 | `Appointments.test.tsx` hides Export for staff                        | unit        |
+| AC-3 | `test_export_forbidden_for_non_admin` (403)                           | integration |
+| AC-4 | `test_export_header_and_rows` and `test_export_empty_has_header_only` | integration |
+| AC-5 | `test_export_respects_filters`                                        | integration |
+| AC-6 | `test_export_50k_rows_under_60s` asserts status 200 and elapsed time  | integration |
+| AC-7 | `test_export_escapes_formula_prefixes` (four prefixes)                | unit        |
 
 ## Risks
 

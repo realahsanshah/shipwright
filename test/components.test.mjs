@@ -63,7 +63,7 @@ test('spec-writing skill and spec-critic agent exist and share the spec section 
   const critic = read('agents/spec-critic.md');
   assert.match(critic, /^Verdict: PASS$/m);
   assert.match(critic, /^Verdict: GAPS$/m);
-  for (const c of ['untestable', 'ambiguous', 'missing-edge-case', 'unmapped-criterion', 'scope', 'product-decision', 'missing-section']) {
+  for (const c of ['untestable', 'ambiguous', 'missing-edge-case', 'unmapped-criterion', 'scope', 'product-decision', 'missing-section', 'open-question']) {
     assert.ok(critic.includes(`[${c}]`), `spec-critic must define category ${c}`);
   }
   const fm = parseFrontmatter(critic);

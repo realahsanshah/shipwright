@@ -48,4 +48,4 @@ For a worked example, read `${CLAUDE_PLUGIN_ROOT}/skills/spec-writing/examples.m
 
 ## Gate
 
-PASS when all 8 sections are present, every AC is testable, every AC appears in the test plan, and `## Open questions` says `None.`. Otherwise FAIL: list what is missing in the spec's `## Open questions` or the run output, and stop. Do not mark the spec approved.
+PASS when all 8 sections are present, every AC is testable, every AC appears in the test plan, and `## Open questions` says `None.`. Otherwise FAIL: report what is missing in the run output (for `/spec`, in the gate-result note) and stop. Do not put gate-failure reasons under `## Open questions`; that section is only for questions to the ticket author. Do not mark the spec approved.
