@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project state
 
-Shipwright is a Claude Code plugin; the repo root is the plugin root. `ticket_to_production.md` is still the design source of truth (the kit's working name there is `delivery-kit`). The approved deviations from it are listed under "Decisions that deviate from the spec" in `docs/superpowers/plans/2026-10-10-kit-foundation.md`: plugin layout instead of a `.claude/` folder, Node `.mjs` instead of `.sh`, global rules shipped as a SessionStart hook (`rules/delivery-rules.md`), the deny-list shipped as `settings/project-settings.json` for `/onboard` to offer, and `deploy.schema.json`, `post-edit-format` and `stop-gate` deferred.
+Shipwright is a Claude Code plugin; the repo root is the plugin root. `ticket_to_production.md` is still the design source of truth (the kit's working name there is `delivery-kit`). The approved deviations from it are listed under "Decisions that deviate from the spec" in `docs/superpowers/plans/2026-10-10-kit-foundation.md`: plugin layout instead of a `.claude/` folder, Node `.mjs` instead of `.sh`, global rules shipped as a SessionStart hook (`rules/delivery-rules.md`), the deny-list shipped as `settings/project-settings.json` for `/onboard` to offer (defense in depth; the guard is primary), and `deploy.schema.json`, `post-edit-format` and `stop-gate` deferred.
 
 Built so far: `/onboard`, `/intake`, `/spec`, the `spec-writing` skill, the `spec-critic` agent, the `ticket` schema, and the hooks. Everything else in the doc is not built yet. Read the relevant section of `ticket_to_production.md` before building any part of the kit. If the code and the doc disagree, raise it rather than silently picking one.
 
@@ -23,13 +23,13 @@ Runtime constraint: `hooks/` and `scripts/` use Node built-ins only, because an 
 
 A versioned Claude Code plugin that client projects install. Layout (all at the repo root): `.claude-plugin/plugin.json`, `commands/`, `skills/`, `agents/`, `hooks/` (`hooks.json`, `session-start.mjs`, `pre-tool-guard.mjs`), `rules/`, `settings/`, `schemas/`, `scripts/`, plus `templates/` and `adapters/` when built. Nothing under `.claude/` is part of the kit. It takes a ticket (Jira, Linear, Azure DevOps, GitHub Issues, or an intake form) to a reviewed PR and a deployed release.
 
-The plugin's `PreToolUse` guard applies to sessions in this repo once the plugin is loaded. It blocks, with exit 2: secret files (`.env*` except `.env*.example/.sample/.template`, keys, `secrets/`, tfstate, cloud credentials) via file tools, Grep on secret paths, and shell commands (Bash/PowerShell) that reference them; edits to the target project's danger zones; `git push --force`/`-f`, `terraform destroy`, and `kubectl delete namespace`.
+The plugin's `PreToolUse` guard applies to sessions in this repo once the plugin is loaded. It blocks, with exit 2: secret files (`.env*` except `.env*.example/.sample/.template`, keys, `secrets/`, tfstate, cloud credentials) via file tools, Grep on secret paths, and shell commands (Bash/PowerShell) that reference them; edits to the target project's danger zones; `git push --force`/`-f`, `terraform destroy`, and `kubectl delete namespace`. The guard is best-effort: it cannot catch every shell form (`grep -r KEY .`, globbed or quoted paths, shell writes into danger zones), and `/verify`'s secret scan (later stage) is the backstop.
 
 ## Contracts pinned by tests
 
 Other components rely on these. Change the test and every consumer together.
 
-- Danger zones: a `## Danger zones` section in the project's `CLAUDE.md`, one backticked glob per bullet (a trailing `/` means everything below). Pinned by `test/pre-tool-guard.test.mjs`; parsed by `readDangerZones` in `hooks/pre-tool-guard.mjs`. Zones block writes only.
+- Danger zones: a `## Danger zones` section in the project's `CLAUDE.md`, one backticked glob per bullet (a trailing `/` or a bare directory name means everything below; a leading `/`, `./` and backslashes are normalised). Pinned by `test/pre-tool-guard.test.mjs`; parsed by `readDangerZones` in `hooks/pre-tool-guard.mjs`. Zones block writes only.
 - `spec.md` sections: Summary, Acceptance criteria, Affected areas, Data changes and migrations, Edge cases, Test plan, Risks, Open questions. Pinned by `SPEC_SECTIONS` in `test/components.test.mjs`.
 - spec-critic verdict: a line `Verdict: PASS` or `Verdict: GAPS`, with findings tagged by category (`[untestable]`, `[ambiguous]`, `[missing-edge-case]`, `[unmapped-criterion]`, `[scope]`, `[product-decision]`, `[missing-section]`, `[open-question]`). Pinned by `test/components.test.mjs`.
 - `.delivery/active`: holds the active ticket id. Read by the commands and named in `rules/delivery-rules.md`; pinned for `/intake` and `/spec` by `test/commands.test.mjs`.
@@ -47,7 +47,7 @@ Supporting commands sit outside the stage chain. `/onboard` writes the target pr
 
 **Deploy adapters.** `/ship` must stay platform-agnostic. All platform logic lives in `adapters/<target>/`, and each adapter implements the same 8 scripts: `check`, `plan`, `provision`, `build`, `deploy`, `smoke`, `rollback`, `record`. Each adapter also has a matching `skills/deploy-<target>/` skill. Add a new platform as a new adapter, never as a special case in the core. A failed `smoke` triggers `rollback`. On a first deploy, `plan` output needs approval before `provision` runs.
 
-**Solo and agents modes.** Every command and skill must work both inline (solo) and when delegated to a subagent in `agents/`. Instructions must never assume a subagent exists. Review agents see the diff and the spec but not the build conversation.
+**Solo and agents modes.** Every command and skill must work both inline (solo) and when delegated to a subagent in `agents/`. Instructions must never assume a subagent exists. `/spec` auto mode picks solo for a bug, chore or refactor with 2 or fewer acceptance criteria, otherwise agents; with no subagent tool it is always solo. Review agents see the diff and the spec but not the build conversation.
 
 ## Rules for authoring kit content
 

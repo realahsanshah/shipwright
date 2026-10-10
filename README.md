@@ -4,9 +4,13 @@ Shipwright is a Claude Code plugin that takes a ticket (Jira, Linear, Azure DevO
 
 ## Try it
 
+Prerequisite: Node >= 20 on PATH (hooks are Node scripts; without node the guard and rules injection silently do nothing).
+
 ```
 claude --plugin-dir "<path to this repo>"
 ```
+
+The guard is best-effort. It blocks Read/Edit/Write/Grep on secret paths and shell commands that name secret files, but it cannot catch every shell form (for example `grep -r KEY .`, globbed or quoted paths, or shell writes into danger zones). The secret scan in `/verify` (a later stage) is the backstop.
 
 ## Commands available
 

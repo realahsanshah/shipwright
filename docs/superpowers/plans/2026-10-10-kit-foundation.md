@@ -16,6 +16,7 @@
 - **Node, not `.sh`.** Hooks and scripts are Node `.mjs` files, so they run unchanged on Windows, macOS and Linux.
 - **Global rules ship as a hook.** Plugins cannot ship `CLAUDE.md` or permission rules. The spec's "global CLAUDE.md" becomes `rules/delivery-rules.md`, which a `SessionStart` hook injects into each session.
 - **The deny-list ships as a snippet.** The spec's `settings.json` deny-list becomes `settings/project-settings.json`, which `/onboard` offers to merge into the project's `.claude/settings.json`. The `pre-tool-guard` hook enforces the same protections even if the engineer never merges it.
+- **`/spec` auto-mode threshold.** The doc leaves it open. In `mode: auto`, a `bug`, `chore` or `refactor` with 2 or fewer acceptance criteria runs the critic solo; anything else uses agents; if no subagent tool is available, solo.
 - **Deferred to the hours 3–6 plan:** `deploy.schema.json`, `post-edit-format` and `stop-gate`. Nothing in hours 0–3 consumes them.
 
 ## Global Constraints
