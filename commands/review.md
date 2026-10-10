@@ -47,7 +47,7 @@ Verdict: PASS
 None.
 ```
 
-7. **On BLOCKING.** Write `review.md` with `Status: FAIL` first. Do not run the Gate script (`pr-description.md` does not exist yet) and do not write `pr-description.md`; go straight to this fix loop. Fix each blocking finding test-first, committed as `<id> fix: <summary>`. Stage by path; never `git add -A` and never `git add .`. Never push. Then rerun `/verify` (the code changed, so the old report is stale), then `/review`. At most 3 rounds in total (the `Round:` line counts them); after the 3rd BLOCKING round, stop and summarise for the engineer. A finding the engineer must decide (a product or security trade-off) is not fixed by guessing: stop the run and show it to the engineer.
+7. **On BLOCKING.** Write `review.md` with `Status: FAIL` first. Do not run the Gate script (`pr-description.md` does not exist yet) and do not write `pr-description.md`; go straight to this fix loop. If a `pr-description.md` from an earlier PASS round exists, delete it (it is stale). Fix each blocking finding test-first, committed as `<id> fix: <summary>`. Stage by path; never `git add -A` and never `git add .`. Never push. Then rerun `/verify` (the code changed, so the old report is stale), then `/review`. At most 3 rounds in total (the `Round:` line counts them); after the 3rd BLOCKING round, stop and summarise for the engineer. A finding the engineer must decide (a product or security trade-off) is not fixed by guessing: stop the run and show it to the engineer.
 
 8. **On PASS, write `pr-description.md`** in this format. Always write it fresh from the current files; never reuse one from an earlier round. The values below are examples of the format only; replace every one of them with the real content and never copy them.
    - The title comes from the ticket.
@@ -92,7 +92,7 @@ None.
 Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/check-review.mjs" .delivery/<id>/spec.md .delivery/<id>/verify-report.md .delivery/<id>/review.md .delivery/<id>/pr-description.md --head <HEAD_CODE>`.
 
 - Exit 0 is PASS. Print the id, the commit and the two verdicts, and say that `/ship` is next.
-- Exit 1 is FAIL. Show the problems (the lines starting `  - `) and handle it as in step 7 (fix or stop). The Gate runs only after a PASS review and a freshly written `pr-description.md`; on a BLOCKING review, skip it and go to step 7.
+- Exit 1 is FAIL. Show the problems (the lines starting `  - `). Both reviewers passed, so keep `review.md` as it is (`Status: PASS`, same `Round:`); a gate failure is not a review round. Fix what the output lists that this command owns (`pr-description.md` rows and sections, the `review.md` preamble) and rerun the Gate, at most 3 attempts, then stop and summarise. If the output says the verify report or the review is stale (a code commit landed), stop and send the engineer to `/verify`. The Gate runs only after a PASS review and a freshly written `pr-description.md`; on a BLOCKING review, skip it and follow step 7.
 - Exit 2 means a usage or input error. Stop and report it.
 
 There is no human gate here. The PR review comes after `/ship`.
