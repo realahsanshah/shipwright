@@ -20,13 +20,17 @@ export const RULES = [
   { id: 'google-api-key', re: /\bAIza[0-9A-Za-z_-]{35}\b/ },
   { id: 'stripe-live-key', re: /\b[sr]k_live_[0-9A-Za-z]{24,}\b/ },
   { id: 'anthropic-api-key', re: /\bsk-ant-[A-Za-z0-9_-]{20,}\b/ },
+  { id: 'jwt', re: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/ },
   // The name may carry a prefix (DB_PASSWORD, AWS_SECRET_ACCESS_KEY). Value: quoted (8+) or unquoted (16+).
   { id: 'generic-assignment', re: /(?<![A-Za-z0-9])(?:[A-Za-z0-9]*[_-])?(?:password|passwd|secret|token|api[_-]?key|access[_-]?key|client[_-]?secret)\b["']?\s*[:=]\s*(?:["']([^"'\s]{8,})["']|([^\s"'#,]{16,}))/i },
 ];
 // A generic-assignment value is a placeholder only when the WHOLE value matches.
 const PLACEHOLDER = /^(?:x+|\*+|changeme|change_me|example|placeholder|dummy|redacted|your[_-][a-z_-]*|<[^>]*>|\$\{[^}]*\}|\{\{[^}]*\}\})$/i;
-// An unquoted value that looks like code (a call, an index, a dotted name, a $VAR) is not a secret.
-const CODE_LIKE = /[()[\]{};]|^\$[A-Za-z_]\w*$|^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$/;
+// An unquoted value counts as code (not a secret) only when it is a digit-free
+// dotted name (settings.SECRET_KEY), a digit-free name directly followed by a
+// call or index that ends the value (jwt.encode(payload, os.environ[), or an
+// env reference ($VAR, ${VAR}, process.env, os.environ).
+const CODE_LIKE = /^(?:\$|process\.env\b|os\.environ\b)|^[A-Za-z_]+(?:\.[A-Za-z_]+)+;?$|^[A-Za-z_]+(?:\.[A-Za-z_]+)*[([][^)\]]*[)\]]?;?$/;
 const ALLOW = 'shipwright:allow-secret';
 const MAX_UNTRACKED_BYTES = 1024 * 1024;
 

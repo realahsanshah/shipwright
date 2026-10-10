@@ -39,6 +39,7 @@ const SAMPLES = {
   'stripe-live-key': STRIPE,
   'anthropic-api-key': ANTHROPIC,
   'generic-assignment': generic('hunter2' + 'hunter2'),
+  jwt: 'eyJ' + 'a'.repeat(12) + '.' + 'b'.repeat(12) + '.' + 'c'.repeat(12),
 };
 
 test('every rule hits an added line with the right file and line', () => {
@@ -294,4 +295,27 @@ test('CLI: a history hit whose line is still present with the allow marker is ac
   const r2 = run(['--base', 'main'], root);
   assert.equal(r2.status, 1, r2.stdout);
   assert.match(r2.stdout, /doc\.md:2 github-token \(commit [0-9a-f]+\)/);
+});
+
+// ---- unquoted JWTs and dotted secrets (re-review) ----
+const JWT = 'eyJ' + 'hbGciOiJIUzI1' + '.' + 'eyJzdWIiOiIx' + 'MjM0' + '.' + 'SflKxwRJSMeK' + 'KF2QT4';
+const MIXED = 'Qx7Lm2Pz9';
+test('unquoted JWTs and secret-looking values with dots or brackets hit', () => {
+  const rules = (t) => scanLines('f', [{ line: 1, text: t }]).map((x) => x.rule);
+  assert.ok(rules('tok' + 'en=' + JWT).includes('jwt'));
+  assert.ok(rules(`${PW_KEY}: ${MIXED}.Wk4Rt8Yn3Bv`).includes('generic-assignment'));
+  assert.ok(rules(`${'API' + '_KEY'}=${MIXED}[Wk4Rt8Yn3Bv]`).includes('generic-assignment'));
+  assert.ok(rules(`${PW_KEY}: foo(bar)${MIXED}Wk4Rt`).includes('generic-assignment'));
+});
+
+test('code-like unquoted values still do not hit', () => {
+  const hit = (t) => scanLines('f', [{ line: 1, text: t }]).length;
+  assert.equal(hit('tok' + 'en = jwt.encode(payload, key)'), 0);
+  assert.equal(hit('tok' + 'en = response.data.accessToken'), 0);
+  assert.equal(hit(`${PW_KEY} = os.environ["DB_PASSWORD"]`), 0);
+  assert.equal(hit('sec' + 'ret = settings.SECRET_KEY'), 0);
+  assert.equal(hit(`${PW_KEY}=$DATABASE_PASSWORD_VALUE`), 0);
+  assert.equal(hit(`${PW_KEY}=\${DATABASE_PASSWORD_VALUE}`), 0);
+  assert.equal(hit('tok' + 'en: process.env.GITHUB_TOKEN_VALUE'), 0);
+  assert.equal(hit('tok' + 'en = getTokenFor(user1)'), 0);
 });
