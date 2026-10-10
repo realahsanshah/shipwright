@@ -223,3 +223,17 @@ test('/run: backlog refresh, target resolution, every stage in order, gates, nev
     .map((n) => md.indexOf(`\${CLAUDE_PLUGIN_ROOT}/commands/${n}.md`));
   assert.deepEqual([...order].sort((a, b) => a - b), order, 'stages must appear in pipeline order');
 });
+
+test('/run resume safety and /breakdown rerun safety', () => {
+  const run = read('commands/run.md');
+  for (const p of ['git fetch origin', 'gh repo view --json url', '.delivery/active', 'check-spec.mjs', 'check-plan.mjs',
+    'check-verify.mjs', 'check-review.mjs', '--head <HEAD_CODE>', 'own retries', 'never commits backlog state']) {
+    assert.ok(run.includes(p), `run.md missing: ${p}`);
+  }
+  assert.ok(run.indexOf('git fetch origin') < run.indexOf('commands/build.md'));
+  const breakdown = read('commands/breakdown.md');
+  for (const p of ['gh issue list --state all', 'Backlog: B-<n> in .delivery/backlog.md', "git commit -F '<message file>' -- .delivery/backlog.md"]) {
+    assert.ok(breakdown.includes(p), `breakdown.md missing: ${p}`);
+  }
+  assert.ok(breakdown.indexOf('gh issue list') < breakdown.indexOf('gh issue create --title'));
+});

@@ -13,8 +13,10 @@ const TICKET_ID = /^(?!.*\.\.)[A-Za-z0-9](?:[A-Za-z0-9._-]{0,62}[A-Za-z0-9_-])?$
 
 export function parseBacklog(text) {
   const lines = text.replace(/^﻿/, '').split(/\r?\n/);
-  const source = lines.find((l) => /^Source:/.test(l))?.replace(/^Source:\s*/, '').trim() ?? null;
-  const statusLine = lines.find((l) => /^Status:/.test(l))?.trim() ?? null;
+  // Source: and Status: count only in the preamble (before the first heading after the title), outside fences.
+  let source = null;
+  let statusLine = null;
+  let preamble = true;
   const items = [];
   let item = null;
   let list = null;
@@ -22,15 +24,21 @@ export function parseBacklog(text) {
   for (const line of lines) {
     if (FENCE.test(line)) { fenced = !fenced; continue; }
     if (fenced) continue;
+    if (/^#{2,6}\s/.test(line)) preamble = false;
+    if (preamble) {
+      if (source === null && /^Source:/.test(line)) source = line.replace(/^Source:\s*/, '').trim();
+      if (statusLine === null && /^Status:/.test(line)) statusLine = line.trim();
+      continue;
+    }
     const head = line.match(ITEM);
     if (head) {
       item = { id: head[1], n: Number(head[2]), title: head[3], type: null, dependsOn: null, state: null,
-        issue: null, ticket: null, pr: null, acceptance: null, openQuestions: null };
+        issue: null, ticket: null, pr: null, acceptance: null, openQuestions: null, repeated: [] };
       items.push(item);
       list = null;
       continue;
     }
-    if (/^#{1,2}\s/.test(line)) { item = null; list = null; continue; }
+    if (/^#{1,6}\s/.test(line)) { item = null; list = null; continue; }
     if (!item) continue;
     const sub = list && line.match(SUB);
     if (sub) { if (!/^none\.?$/i.test(sub[1])) item[list].push(sub[1]); continue; }
@@ -39,16 +47,19 @@ export function parseBacklog(text) {
     const key = field[1].toLowerCase();
     const value = field[2];
     list = null;
+    const prop = { type: 'type', state: 'state', 'depends on': 'dependsOn', issue: 'issue', ticket: 'ticket', pr: 'pr',
+      'acceptance criteria': 'acceptance', 'open questions': 'openQuestions' }[key];
+    if (item[prop] !== null) { item.repeated.push(field[1]); continue; }
     if (key === 'type') item.type = value.toLowerCase();
     else if (key === 'state') item.state = value.toLowerCase();
-    else if (key === 'depends on') item.dependsOn = /^none\b/i.test(value) ? [] : value.split(',').map((s) => s.trim()).filter(Boolean);
+    else if (key === 'depends on') item.dependsOn = /^none\.?$/i.test(value) ? [] : value.split(',').map((s) => s.trim()).filter(Boolean);
     else if (key === 'issue') item.issue = value;
     else if (key === 'ticket') item.ticket = value;
     else if (key === 'pr') item.pr = value;
     else if (key === 'acceptance criteria') { item.acceptance = []; list = 'acceptance'; }
     else { item.openQuestions = []; list = 'openQuestions'; }
   }
-  return { source, statusLine, approved: APPROVED.test(statusLine ?? ''), items };
+  return { source, statusLine, approved: APPROVED.test(statusLine ?? ''), items, unclosedFence: fenced };
 }
 
 function findCycle(items) {
@@ -74,6 +85,7 @@ export function checkBacklog(backlog, { requireApproved = false } = {}) {
   const errors = [];
   if (requireApproved && !backlog.approved) errors.push(`backlog is not approved (${backlog.statusLine ?? 'no Status: line'})`);
   if (backlog.items.length === 0) errors.push('backlog has no "## B-<n>: <title>" items');
+  if (backlog.unclosedFence) errors.push('a fenced code block is never closed, so everything after it is ignored');
   const ids = new Set();
   for (const item of backlog.items) {
     const label = item.id;
@@ -82,7 +94,12 @@ export function checkBacklog(backlog, { requireApproved = false } = {}) {
     if (!item.title) errors.push(`${label}: missing title`);
     if (!TYPES.includes(item.type)) errors.push(`${label}: Type must be one of ${TYPES.join(', ')}`);
     if (!STATES.includes(item.state)) errors.push(`${label}: State must be one of ${STATES.join(', ')}`);
-    for (const f of ['issue', 'ticket', 'pr']) if (item[f] === null) errors.push(`${label}: missing "- ${f === 'pr' ? 'PR' : f[0].toUpperCase() + f.slice(1)}:"`);
+    for (const f of ['Issue', 'Ticket', 'PR']) {
+      const value = item[f.toLowerCase()];
+      if (value === null) errors.push(`${label}: missing "- ${f}:"`);
+      else if (!validValue(f, value)) errors.push(`${label}: invalid ${f} value ${JSON.stringify(value)} (${SHAPES[f]})`);
+    }
+    for (const f of new Set(item.repeated)) errors.push(`${label}: field "${f}" appears more than once`);
     if (item.dependsOn === null) errors.push(`${label}: missing "- Depends on:"`);
     if (item.acceptance === null || item.acceptance.length === 0) errors.push(`${label}: needs at least one acceptance criterion`);
     if (item.openQuestions === null) errors.push(`${label}: missing "- Open questions:" (use "- None.")`);
@@ -113,10 +130,20 @@ export function nextItem(backlog) {
   return { item: null, reason: [...waiting, ...others].join('; ') || 'no runnable item' };
 }
 
+// Issue, Ticket and PR values reach gh commands in /run, so their shape is enforced on read (check) and write (set).
+const GH_REPO = 'https:\\/\\/github\\.com\\/[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+';
+const ISSUE_URL = new RegExp(`^${GH_REPO}\\/issues\\/\\d+$`);
+const PR_URL = new RegExp(`^${GH_REPO}\\/pull\\/\\d+$`);
+const SHAPES = {
+  Issue: 'none, #<n> or https://github.com/<owner>/<repo>/issues/<n>',
+  Ticket: 'none or a ticket id',
+  PR: 'none or https://github.com/<owner>/<repo>/pull/<n>',
+};
+
 function validValue(field, value) {
   if (field === 'State') return STATES.includes(value);
-  if (field === 'Issue') return value === 'none' || /^#\d+$/.test(value) || /^https:\/\/\S+$/.test(value);
-  if (field === 'PR') return value === 'none' || /^https:\/\/\S+$/.test(value);
+  if (field === 'Issue') return value === 'none' || /^#\d+$/.test(value) || ISSUE_URL.test(value);
+  if (field === 'PR') return value === 'none' || PR_URL.test(value);
   return value === 'none' || TICKET_ID.test(value);
 }
 
@@ -139,7 +166,7 @@ export function setFields(text, id, updates) {
     if (fenced) continue;
     const head = line.match(ITEM);
     if (head) { inItem = head[1] === id; found ||= inItem; list = false; continue; }
-    if (/^#{1,2}\s/.test(line)) { inItem = false; list = false; continue; }
+    if (/^#{1,6}\s/.test(line)) { inItem = false; list = false; continue; }
     if (!inItem) continue;
     if (list && SUB.test(line)) continue;
     const field = line.match(FIELD);

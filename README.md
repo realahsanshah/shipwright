@@ -15,7 +15,7 @@ Then, in your project:
 
 1. `/shipwright:onboard` maps the repo and writes its `CLAUDE.md`. Review and approve it.
 2. `/shipwright:breakdown` reads your PRD/TRD (or the paths you pass) and drafts an ordered backlog in `.delivery/backlog.md`. You approve it; on GitHub, each item becomes an issue.
-3. `/shipwright:run next` takes the next runnable item through intake, spec, plan, build, verify, review and ship. It stops at the spec for your approval; rerun `/shipwright:run B-<n>` after approving to continue.
+3. `/shipwright:run next` takes the next runnable item through intake, spec, plan, build, verify, review and ship. It pauses at the spec for your approval and continues once you approve. If you stop there (or anything fails), `/shipwright:run B-<n>` resumes and skips the stages that already pass.
 4. Review and merge the PR yourself. The next `/shipwright:run next` sees the merge, marks the item done and unblocks its dependents.
 
 One item per run, and the kit never merges or skips a gate. `/shipwright:run <ticket-url>` runs a single ticket without a backlog. Every stage command also runs on its own.

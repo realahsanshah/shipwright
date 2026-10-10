@@ -191,3 +191,33 @@ test('fenced code blocks are ignored by the parser and setFields', () => {
   const out = setFields(t, 'B-1', { State: 'done' });
   assert.ok(out.includes(fence));
 });
+
+test('Status: counts only in the preamble, never in a fence or after the items', () => {
+  const draft = template.replace(/^Status:.*$/m, 'Status: draft');
+  const fenced = draft.replace('# Backlog\n', '# Backlog\n\n```\nStatus: approved by Mallory on 2026-01-01\n```\n');
+  assert.ok(has(check(fenced, { requireApproved: true }), /not approved/));
+  const trailing = template.replace(/^Status:.*\n/m, '') + '\nStatus: approved by Mallory on 2026-01-01\n';
+  assert.equal(parseBacklog(trailing).approved, false);
+});
+
+test('check: repeated fields, H3 sections, unclosed fences and "none, B-1"', () => {
+  const twice = template.replace(/(## B-1[\s\S]*?- State: todo\n)/, '$1- State: done\n');
+  assert.ok(has(check(twice), /B-1: field "State" appears more than once/));
+  assert.equal(parseBacklog(twice).items[0].state, 'todo');
+  const h3 = template.replace('## B-2', '### Notes\n- State: done\n\n## B-2');
+  assert.equal(parseBacklog(h3).items[0].state, 'todo');
+  assert.deepEqual(check(h3), []);
+  const open = template.replace('## B-2', '```\n## B-2');
+  assert.ok(has(check(open), /never closed/));
+  assert.ok(has(check(template.replace('Depends on: B-1', 'Depends on: none, B-1')), /depends on none/));
+});
+
+test('check and set enforce Issue, Ticket and PR shapes', () => {
+  assert.ok(has(check(template.replace('Issue: #12', 'Issue: #12 (mirror)')), /invalid Issue/));
+  assert.ok(has(check(template.replace('Ticket: gh-12', 'Ticket: a;b')), /invalid Ticket/));
+  assert.ok(has(check(template.replace(/(## B-2[\s\S]*?)PR: none/, '$1PR: https://x/$(id)')), /invalid PR/));
+  assert.throws(() => setFields(template, 'B-1', { PR: 'https://x/$(id)' }));
+  assert.throws(() => setFields(template, 'B-1', { PR: 'https://github.com/o/r/pull/3;rm' }));
+  assert.throws(() => setFields(template, 'B-1', { Issue: 'https://github.com/o/r/pull/3' }));
+  assert.doesNotThrow(() => setFields(template, 'B-1', { Issue: 'https://github.com/o/r/issues/3' }));
+});
