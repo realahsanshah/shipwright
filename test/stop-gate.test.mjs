@@ -107,3 +107,17 @@ test('process: no .delivery exits 0', () => {
   const r = run('{}', gitRepo());
   assert.equal(r.status, 0, r.stderr);
 });
+
+test('process: SHIPWRIGHT_STOP_GATE=0 opts out even when it would block', () => {
+  const d = gitRepo();
+  fs.mkdirSync(path.join(d, '.delivery', 'HC-1'), { recursive: true });
+  fs.writeFileSync(path.join(d, '.delivery', 'active'), 'HC-1\n');
+  fs.writeFileSync(path.join(d, '.delivery', 'HC-1', 'verify-report.md'), FAIL1);
+  const r = spawnSync(process.execPath, [hook], {
+    input: '{"stop_hook_active": false}',
+    encoding: 'utf8',
+    env: { ...process.env, CLAUDE_PROJECT_DIR: d, SHIPWRIGHT_STOP_GATE: '0' },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stderr, '');
+});

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // PostToolUse: after Claude edits a file, run the project's own formatter and
 // linter on it. Silent on success; problems go back to Claude via exit 2.
-// Opt out with SHIPWRIGHT_FORMAT_ON_EDIT=0.
+// eslint and ruff run only when the project configures them; a tool that cannot
+// be started is skipped (fail open). Opt out with SHIPWRIGHT_FORMAT_ON_EDIT=0.
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -34,22 +35,55 @@ export function onPath(name, env = process.env, exists = fs.existsSync) {
   return null;
 }
 
-export function planTools(relPath, projectDir, find = { localBin, onPath }) {
+// The project's own virtualenv copy of a Python tool, if there is one.
+export function venvBin(projectDir, name, exists = fs.existsSync) {
+  const candidates = [path.join(projectDir, '.venv', 'Scripts', `${name}.exe`), path.join(projectDir, '.venv', 'bin', name)];
+  return candidates.find((c) => exists(c)) ?? null;
+}
+
+// eslint runs only when the project configures it: a flat config, a legacy .eslintrc*, or package.json "eslintConfig".
+export function hasEslintConfig(projectDir) {
+  let names = [];
+  try { names = fs.readdirSync(projectDir); } catch { return false; }
+  if (names.some((n) => /^eslint\.config\.(?:js|mjs|cjs|ts|mts|cts)$/.test(n) || /^\.eslintrc(?:\.|$)/.test(n))) return true;
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(projectDir, 'package.json'), 'utf8').replace(/^﻿/, ''));
+    return pkg !== null && typeof pkg === 'object' && Object.hasOwn(pkg, 'eslintConfig');
+  } catch {
+    return false;
+  }
+}
+
+// ruff runs only when the project configures it: [tool.ruff] in pyproject.toml, or ruff.toml / .ruff.toml.
+export function hasRuffConfig(projectDir) {
+  if (['ruff.toml', '.ruff.toml'].some((n) => fs.existsSync(path.join(projectDir, n)))) return true;
+  try {
+    return /^\s*\[tool\.ruff(?:\.[^\]]*)?\]/m.test(fs.readFileSync(path.join(projectDir, 'pyproject.toml'), 'utf8'));
+  } catch {
+    return false;
+  }
+}
+
+const DEFAULT_FIND = { localBin, onPath, venvBin, eslintConfig: hasEslintConfig, ruffConfig: hasRuffConfig };
+
+// `--` before the file so a file name starting with "-" is never read as an option.
+export function planTools(relPath, projectDir, find = {}) {
+  const f = { ...DEFAULT_FIND, ...find };
   const ext = path.extname(relPath).toLowerCase();
   const tools = [];
   if (PRETTIER_EXT.has(ext)) {
-    const bin = find.localBin(projectDir, 'prettier');
-    if (bin) tools.push({ kind: 'format', name: 'prettier', cmd: bin, args: ['--write', relPath] });
+    const bin = f.localBin(projectDir, 'prettier');
+    if (bin) tools.push({ kind: 'format', name: 'prettier', cmd: bin, args: ['--write', '--', relPath] });
   }
-  if (ESLINT_EXT.has(ext)) {
-    const bin = find.localBin(projectDir, 'eslint');
-    if (bin) tools.push({ kind: 'lint', name: 'eslint', cmd: bin, args: [relPath] });
+  if (ESLINT_EXT.has(ext) && f.eslintConfig(projectDir)) {
+    const bin = f.localBin(projectDir, 'eslint');
+    if (bin) tools.push({ kind: 'lint', name: 'eslint', cmd: bin, args: ['--', relPath] });
   }
-  if (PYTHON_EXT.has(ext)) {
-    const bin = find.onPath('ruff');
+  if (PYTHON_EXT.has(ext) && f.ruffConfig(projectDir)) {
+    const bin = f.venvBin(projectDir, 'ruff') ?? f.onPath('ruff');
     if (bin) {
-      tools.push({ kind: 'format', name: 'ruff format', cmd: bin, args: ['format', relPath] });
-      tools.push({ kind: 'lint', name: 'ruff check', cmd: bin, args: ['check', relPath] });
+      tools.push({ kind: 'format', name: 'ruff format', cmd: bin, args: ['format', '--', relPath] });
+      tools.push({ kind: 'lint', name: 'ruff check', cmd: bin, args: ['check', '--', relPath] });
     }
   }
   return tools;
@@ -68,6 +102,7 @@ export function runTool(tool, projectDir) {
     ? spawnSync([tool.cmd, ...tool.args].map((a) => `"${a}"`).join(' '), { cwd: projectDir, encoding: 'utf8', shell: true, timeout: TOOL_TIMEOUT_MS })
     : spawnSync(tool.cmd, tool.args, { cwd: projectDir, encoding: 'utf8', timeout: TOOL_TIMEOUT_MS });
   if (r.error?.code === 'ETIMEDOUT') return { ok: true, output: '' }; // a slow tool must not block editing
+  if (r.error || r.status === null) return { ok: true, output: '', notRun: true }; // could not run it: fail open
   const output = `${r.stdout ?? ''}${r.stderr ?? ''}`.trim();
   return { ok: r.status === 0, output };
 }
@@ -95,6 +130,7 @@ function main() {
     let lintFailed = false;
     for (const tool of planTools(rel, projectDir)) {
       const r = runTool(tool, projectDir);
+      if (r.notRun) process.stderr.write(`post-edit-format: could not run ${tool.name}\n`);
       if (r.ok) continue;
       if (tool.kind === 'format') outputs.push(`format failed (${tool.name})${r.output ? `:\n${r.output}` : ''}`);
       else {

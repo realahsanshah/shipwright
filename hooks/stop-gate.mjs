@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Stop hook: while the active ticket's latest /verify failed and attempts remain,
 // refuse to let Claude finish (exit 2; stderr tells it why). Narrow on purpose so
-// it never traps a session that has moved on.
+// it never traps a session that has moved on. Opt out with SHIPWRIGHT_STOP_GATE=0.
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -40,6 +40,7 @@ export function decideStop(input, projectDir, currentBranch = gitBranch) {
 }
 
 function main() {
+  if (process.env.SHIPWRIGHT_STOP_GATE === '0') process.exit(0);
   let input;
   try {
     input = JSON.parse(fs.readFileSync(0, 'utf8'));
