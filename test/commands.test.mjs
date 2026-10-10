@@ -202,3 +202,24 @@ test('/breakdown: embedded template parses with parseBacklog and passes checkBac
   assert.ok(parsed.items.length >= 1);
   assert.deepEqual(checkBacklog(parsed), []);
 });
+
+test('/run: backlog refresh, target resolution, every stage in order, gates, never merges', () => {
+  const md = read('commands/run.md');
+  for (const phrase of [
+    'next', 'B-<n>', 'backlog.mjs" next', 'backlog.mjs" set',
+    'State=in-progress', 'State=in-review', 'State=done',
+    'gh pr view', 'MERGED',
+    '${CLAUDE_PLUGIN_ROOT}/commands/intake.md',
+    '${CLAUDE_PLUGIN_ROOT}/commands/spec.md',
+    '${CLAUDE_PLUGIN_ROOT}/commands/plan.md',
+    '${CLAUDE_PLUGIN_ROOT}/commands/build.md',
+    '${CLAUDE_PLUGIN_ROOT}/commands/verify.md',
+    '${CLAUDE_PLUGIN_ROOT}/commands/review.md',
+    '${CLAUDE_PLUGIN_ROOT}/commands/ship.md',
+    'never merge', 'spec gate', 'one item',
+  ]) assert.ok(md.includes(phrase), `run.md must mention "${phrase}"`);
+  assert.match(md, /stop/i);
+  const order = ['intake', 'spec', 'plan', 'build', 'verify', 'review', 'ship']
+    .map((n) => md.indexOf(`\${CLAUDE_PLUGIN_ROOT}/commands/${n}.md`));
+  assert.deepEqual([...order].sort((a, b) => a - b), order, 'stages must appear in pipeline order');
+});
