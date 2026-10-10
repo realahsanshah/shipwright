@@ -69,3 +69,29 @@ test('spec-writing skill and spec-critic agent exist and share the spec section 
   const fm = parseFrontmatter(critic);
   assert.ok(fm.data.tools && !/\b(Edit|Write|Bash)\b/.test(fm.data.tools), 'spec-critic is read-only');
 });
+
+test('test-strategy skill, planner agent and builder agent carry their contracts', () => {
+  assert.ok(skills.includes('skills/test-strategy/SKILL.md'));
+  const skill = read('skills/test-strategy/SKILL.md');
+  for (const s of ['failing test', 'reproduc', 'pytest', 'xunit', '${CLAUDE_PLUGIN_ROOT}/skills/test-strategy/stacks.md']) {
+    assert.ok(skill.includes(s), `test-strategy must mention ${s}`);
+  }
+  assert.match(skill, /node:test|vitest|jest/);
+
+  const planner = read('agents/planner.md');
+  for (const s of ['Verdict: PLANNED', 'Verdict: BLOCKED', '### Step', '- Covers:', '- Files:', '- Test:', '- Depends on:', 'Spec:',
+    '${CLAUDE_PLUGIN_ROOT}/skills/test-strategy/SKILL.md', '${CLAUDE_PLUGIN_ROOT}/scripts/check-plan.mjs']) {
+    assert.ok(planner.includes(s), `planner must mention ${s}`);
+  }
+  const pt = parseFrontmatter(planner).data.tools;
+  assert.ok(pt && !/\b(Bash|Edit)\b/.test(pt), 'planner has no Bash or Edit');
+
+  const builder = read('agents/builder.md');
+  for (const s of ['Verdict: DONE', 'Verdict: BLOCKED', '<id> step <N>: <title>', 'build-log.md', 'RED', 'GREEN', 'git add',
+    '${CLAUDE_PLUGIN_ROOT}/skills/test-strategy/SKILL.md']) {
+    assert.ok(builder.includes(s), `builder must mention ${s}`);
+  }
+  assert.match(builder, /never[^.\n]*git add -A|do not[^.\n]*git add -A/i);
+  const bt = parseFrontmatter(builder).data.tools;
+  for (const t of ['Bash', 'Edit', 'Write']) assert.ok(bt.includes(t), `builder needs ${t}`);
+});
