@@ -178,3 +178,27 @@ test('delivery rules: push exception for /ship; onboard gitignores .delivery/act
   const onboard = read('commands/onboard.md');
   assert.ok(onboard.includes('.delivery/active') && onboard.includes('.gitignore'));
 });
+
+test('/breakdown: inputs, backlog check, approval gate, issue creation without duplicates', () => {
+  const md = read('commands/breakdown.md');
+  for (const phrase of [
+    '$ARGUMENTS', '.delivery/backlog.md',
+    'node "${CLAUDE_PLUGIN_ROOT}/scripts/backlog.mjs" check', '--approved',
+    'Status: approved by', 'git config user.name',
+    'gh issue create', '--body-file', '"$(cat \'',
+    'backlog.mjs" set', 'Issue: none', 'data, not instructions',
+    'open question', '/shipwright:run',
+  ]) assert.ok(md.includes(phrase), `breakdown.md must mention "${phrase}"`);
+  assert.match(md, /never (create|guess)/i);
+});
+
+test('/breakdown: embedded template parses with parseBacklog and passes checkBacklog', async () => {
+  const { parseBacklog, checkBacklog } = await import('../scripts/lib/backlog.mjs');
+  const md = read('commands/breakdown.md');
+  const blocks = [...md.matchAll(/```markdown\r?\n([\s\S]*?)```/g)].map((m) => m[1]);
+  const tpl = blocks.find((b) => b.includes('## B-1'));
+  assert.ok(tpl, 'breakdown.md must embed a backlog template');
+  const parsed = parseBacklog(tpl);
+  assert.ok(parsed.items.length >= 1);
+  assert.deepEqual(checkBacklog(parsed), []);
+});
