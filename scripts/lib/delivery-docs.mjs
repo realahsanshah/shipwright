@@ -184,3 +184,74 @@ export function checkBuild(plan, log) {
   }
   return errors;
 }
+
+export const REQUIRED_CHECKS = ['tests', 'lint', 'types', 'build', 'dependency audit', 'secret scan', 'coverage'];
+export const NEVER_SKIPPED = ['tests', 'secret scan'];
+
+function splitRow(line) {
+  const inner = line.trim().replace(/^\|/, '').replace(/(?<!\\)\|$/, '');
+  return inner.split(/(?<!\\)\|/).map((cell) => cell.replace(/\\\|/g, '|').trim());
+}
+
+// Data rows of the first Markdown table in a section (header and separator dropped).
+function tableRows(sectionLines) {
+  const rows = sectionLines.filter((l) => l.trim().startsWith('|')).map(splitRow)
+    .filter((cells) => !cells.every((c) => /^:?-{3,}:?$/.test(c)));
+  return rows.slice(1);
+}
+
+export function parseVerifyReport(text) {
+  const { preamble, sections } = splitSections(text);
+  const field = (name) => {
+    for (const line of preamble) {
+      const m = line.match(new RegExp(`^${name}:\\s*(.*?)\\s*$`));
+      if (m) return m[1];
+    }
+    return null;
+  };
+  const status = field('Status');
+  const attempts = field('Attempts');
+  return {
+    status: status === 'PASS' || status === 'FAIL' ? status : null,
+    attempts: attempts !== null && /^\d+$/.test(attempts) ? Number(attempts) : null,
+    commit: field('Commit')?.replace(/`/g, '') || null,
+    checks: tableRows(sections.get('Checks') ?? []).map(([name = '', command = '', result = '', notes = '']) => (
+      { name: name.toLowerCase(), command, result: result.toUpperCase(), notes })),
+    evidence: tableRows(sections.get('Acceptance criteria evidence') ?? []).map(([ac = '', evidence = '', result = '']) => (
+      { ac, evidence, result: result.toUpperCase() })),
+  };
+}
+
+export function checkVerify(spec, report) {
+  const errors = checkSpec(spec).map((e) => `spec: ${e}`);
+  if (report.status === null) errors.push('missing "Status: PASS" or "Status: FAIL" line');
+  if (report.attempts === null || report.attempts < 1) errors.push('missing "Attempts: N" line (N ≥ 1)');
+  if (!report.commit || !SHA.test(report.commit)) errors.push('missing "Commit: <sha>" line');
+  let failed = false;
+  for (const name of REQUIRED_CHECKS) {
+    const rows = report.checks.filter((c) => c.name === name);
+    if (rows.length === 0) { errors.push(`missing check "${name}"`); continue; }
+    if (rows.length > 1) errors.push(`check "${name}" is listed more than once`);
+    const check = rows[0];
+    if (!['PASS', 'FAIL', 'SKIP'].includes(check.result)) errors.push(`check "${name}": result must be PASS, FAIL or SKIP`);
+    if (check.result === 'SKIP' && NEVER_SKIPPED.includes(name)) errors.push(`check "${name}" can never be skipped`);
+    if (check.result === 'SKIP' && !check.notes) errors.push(`check "${name}": SKIP needs a reason in Notes`);
+    if (check.result !== 'SKIP' && !check.command) errors.push(`check "${name}": missing command`);
+  }
+  if (report.checks.some((c) => c.result === 'FAIL')) failed = true;
+  const known = new Set(spec.acIds);
+  for (const id of spec.acIds) {
+    const rows = report.evidence.filter((e) => e.ac === id);
+    if (rows.length === 0) errors.push(`${id}: no evidence row`);
+    for (const row of rows) {
+      if (!row.evidence) errors.push(`${id}: evidence is empty`);
+      if (!['PASS', 'FAIL'].includes(row.result)) errors.push(`${id}: result must be PASS or FAIL`);
+    }
+  }
+  if (report.evidence.some((e) => e.result === 'FAIL')) failed = true;
+  for (const row of report.evidence) if (!known.has(row.ac)) errors.push(`evidence row for ${row.ac || '(blank)'}, which is not in the spec`);
+  const outcome = failed || errors.length > 0 ? 'FAIL' : 'PASS';
+  if (report.status === 'PASS' && outcome === 'FAIL') errors.push('report says Status: PASS but a check or criterion failed or is missing');
+  if (report.status === 'FAIL' && !failed && errors.length === 0) errors.push('report says Status: FAIL but every check and criterion passed');
+  return { errors, outcome };
+}

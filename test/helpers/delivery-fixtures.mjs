@@ -59,3 +59,31 @@ export function buildLogText(plan, overrides = {}) {
   });
   return `# Build log: HC-142\n\n${entries.join('\n')}`;
 }
+
+// A passing verify report. `checks` maps a check name to field overrides (null drops the row);
+// `evidence` replaces the evidence rows when given (an array of raw table-row strings).
+export function verifyReportText(spec, { status = 'PASS', attempts = 1, commit = '9e05129', checks = {}, evidence } = {}) {
+  const names = ['tests', 'lint', 'types', 'build', 'dependency audit', 'secret scan', 'coverage'];
+  const rows = names.filter((n) => checks[n] !== null).map((n) => {
+    const c = { command: `\`run ${n}\``, result: 'PASS', notes: '', ...(checks[n] ?? {}) };
+    return `| ${n} | ${c.command} | ${c.result} | ${c.notes} |`;
+  });
+  const ev = evidence ?? spec.acIds.map((id) => `| ${id} | \`test/${id.toLowerCase()}.test.js\` passed | PASS |`);
+  const head = [status && `Status: ${status}`, attempts !== null && `Attempts: ${attempts}`, commit && `Commit: ${commit}`].filter(Boolean).join('\n');
+  return `# Verify report: HC-142
+
+${head}
+
+## Checks
+
+| Check | Command | Result | Notes |
+|---|---|---|---|
+${rows.join('\n')}
+
+## Acceptance criteria evidence
+
+| AC | Evidence | Result |
+|---|---|---|
+${ev.join('\n')}
+`;
+}

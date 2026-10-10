@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseSpec, checkSpec, SPEC_SECTIONS, parsePlan, checkPlan, parseBuildLog, checkBuild } from '../scripts/lib/delivery-docs.mjs';
-import { specText, planText, buildLogText } from './helpers/delivery-fixtures.mjs';
+import { parseSpec, checkSpec, SPEC_SECTIONS, parsePlan, checkPlan, parseBuildLog, checkBuild, parseVerifyReport, checkVerify } from '../scripts/lib/delivery-docs.mjs';
+import { specText, planText, buildLogText, verifyReportText } from './helpers/delivery-fixtures.mjs';
 
 test('valid spec parses and passes', () => {
   const s = parseSpec(specText());
@@ -210,4 +210,98 @@ test('build log keys are case-insensitive; CRLF and BOM accepted', () => {
   assert.equal(buildErrors({}, lower), '');
   const crlf = '\uFEFF' + buildLogText(plan2).replace(/\n/g, '\r\n');
   assert.equal(buildErrors({}, crlf), '');
+});
+
+const CONTRACT_REPORT = `# Verify report: HC-142
+
+Status: PASS
+Attempts: 1
+Commit: 9e05129
+
+## Checks
+
+| Check | Command | Result | Notes |
+|---|---|---|---|
+| tests | \`npm test\` | PASS | 56 passed |
+| lint | \`npm run lint\` | PASS | |
+| types | \`npx tsc --noEmit\` | PASS | |
+| build | \`npm run build\` | PASS | |
+| dependency audit | \`npm audit --audit-level=high\` | PASS | 0 high |
+| secret scan | \`node "<plugin>/scripts/secret-scan.mjs" --base main\` | PASS | clean |
+| coverage | \`npm run coverage\` | SKIP | no coverage command in CLAUDE.md |
+
+## Acceptance criteria evidence
+
+| AC | Evidence | Result |
+|---|---|---|
+| AC-1 | \`api/tests/test_export_endpoint.py::test_export_respects_filters\` passed | PASS |
+`;
+const vSpec1 = parseSpec(specText({ acs: ['AC-1'] }));
+const vSpec2 = parseSpec(specText());
+const verifyErrors = (opts, spec = vSpec2, text) => checkVerify(spec, parseVerifyReport(text ?? verifyReportText(spec, opts))).errors.join('\n');
+
+test('contract verify-report template passes against its spec', () => {
+  const report = parseVerifyReport(CONTRACT_REPORT);
+  assert.equal(report.status, 'PASS');
+  assert.equal(report.attempts, 1);
+  assert.equal(report.commit, '9e05129');
+  assert.equal(report.checks.length, 7);
+  assert.equal(report.checks[0].name, 'tests');
+  assert.deepEqual(checkVerify(vSpec1, report), { errors: [], outcome: 'PASS' });
+});
+
+test('valid verify report passes', () => {
+  assert.equal(verifyErrors({}), '');
+});
+
+test('backticked Commit value is accepted', () => {
+  assert.equal(verifyErrors({ commit: '`9e05129`' }), '');
+});
+
+test('required checks: missing and duplicate', () => {
+  for (const name of ['tests', 'lint', 'types', 'build', 'dependency audit', 'secret scan', 'coverage']) {
+    assert.ok(verifyErrors({ checks: { [name]: null } }).includes(`missing check "${name}"`), name);
+  }
+  const dupe = verifyReportText(vSpec2).replace('| lint |', '| lint | `x` | PASS | |\n| lint |');
+  assert.match(verifyErrors({}, vSpec2, dupe), /more than once/);
+});
+
+test('SKIP rules and commands', () => {
+  assert.match(verifyErrors({ checks: { tests: { result: 'SKIP', notes: 'no' } } }), /can never be skipped/);
+  assert.match(verifyErrors({ checks: { 'secret scan': { result: 'SKIP', notes: 'no' } } }), /can never be skipped/);
+  assert.match(verifyErrors({ checks: { lint: { result: 'SKIP' } } }), /needs a reason/);
+  assert.equal(verifyErrors({ checks: { lint: { result: 'SKIP', notes: 'no linter', command: '' } } }), '');
+  assert.match(verifyErrors({ checks: { lint: { command: '' } } }), /missing command/);
+});
+
+test('acceptance criteria evidence rules', () => {
+  assert.ok(verifyErrors({ evidence: ['| AC-1 | `t` passed | PASS |'] }).includes('AC-2: no evidence row'));
+  assert.match(verifyErrors({ evidence: ['| AC-1 |  | PASS |', '| AC-2 | `t` | PASS |'] }), /evidence is empty/);
+  assert.match(verifyErrors({ evidence: ['| AC-1 | `t` | PASS |', '| AC-2 | `t` | PASS |', '| AC-9 | `t` | PASS |'] }), /not in the spec/);
+});
+
+test('Status must agree with the rows', () => {
+  assert.match(verifyErrors({ checks: { lint: { result: 'FAIL' } } }), /says Status: PASS but/);
+  assert.match(verifyErrors({ status: 'FAIL' }), /says Status: FAIL but/);
+});
+
+test('missing Status, Attempts and Commit', () => {
+  assert.match(verifyErrors({ status: '' }), /Status: PASS/);
+  assert.match(verifyErrors({ attempts: null }), /Attempts/);
+  assert.match(verifyErrors({ commit: '' }), /Commit/);
+});
+
+test('consistent FAIL report has no errors and outcome FAIL', () => {
+  const report = parseVerifyReport(verifyReportText(vSpec2, { status: 'FAIL', attempts: 2, checks: { tests: { result: 'FAIL' } } }));
+  assert.deepEqual(checkVerify(vSpec2, report), { errors: [], outcome: 'FAIL' });
+});
+
+test('escaped pipes, alignment separators, BOM and CRLF', () => {
+  const piped = verifyReportText(vSpec2).replace('`run tests`', '`a \\| b`');
+  assert.equal(parseVerifyReport(piped).checks[0].command, '`a | b`');
+  const aligned = verifyReportText(vSpec2).replace('|---|---|---|---|', '|:---:|:---|---:|---|');
+  assert.equal(verifyErrors({}, vSpec2, aligned), '');
+  assert.equal(parseVerifyReport(aligned).checks.length, 7);
+  const crlf = '\uFEFF' + verifyReportText(vSpec2).replace(/\n/g, '\r\n');
+  assert.equal(verifyErrors({}, vSpec2, crlf), '');
 });

@@ -5,8 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { specText, planText, buildLogText } from './helpers/delivery-fixtures.mjs';
-import { parsePlan } from '../scripts/lib/delivery-docs.mjs';
+import { specText, planText, buildLogText, verifyReportText } from './helpers/delivery-fixtures.mjs';
+import { parsePlan, parseSpec } from '../scripts/lib/delivery-docs.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'check cli '));
@@ -57,4 +57,20 @@ test('check-build: valid exits 0, invalid exits 1, usage exits 2', () => {
   assert.equal(bad.status, 1);
   assert.match(bad.stdout, /^failed: /);
   assert.equal(run('check-build.mjs', planFile).status, 2);
+});
+
+test('check-verify: PASS exits 0, consistent FAIL exits 1, inconsistent exits 1, usage exits 2', () => {
+  const spec = parseSpec(specText());
+  const specFile = write('spec4.md', specText());
+  const good = run('check-verify.mjs', specFile, write('verify-report.md', verifyReportText(spec)));
+  assert.equal(good.status, 0);
+  assert.match(good.stdout, /^ok: /);
+  const failed = run('check-verify.mjs', specFile, write('fail-report.md', verifyReportText(spec, { status: 'FAIL', attempts: 2, checks: { tests: { result: 'FAIL' } } })));
+  assert.equal(failed.status, 1);
+  assert.match(failed.stdout, /^failed: /);
+  assert.match(failed.stdout, /Status: FAIL \(attempt 2 of 3\)/);
+  const bad = run('check-verify.mjs', specFile, write('bad-report.md', verifyReportText(spec, { checks: { lint: null } })));
+  assert.equal(bad.status, 1);
+  assert.match(bad.stdout, /missing check "lint"/);
+  assert.equal(run('check-verify.mjs', specFile).status, 2);
 });
