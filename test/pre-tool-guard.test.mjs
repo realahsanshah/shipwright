@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -9,6 +9,7 @@ import { checkFile, checkCommand, checkShellSecrets, decide, readDangerZones, is
 
 const hook = fileURLToPath(new URL('../hooks/pre-tool-guard.mjs', import.meta.url));
 const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'Ahsan Shah Workspace proj '));
+after(() => fs.rmSync(proj, { recursive: true, force: true }));
 fs.writeFileSync(path.join(proj, 'CLAUDE.md'), [
   '# Project',
   '## Danger zones',
@@ -28,7 +29,7 @@ const runHook = (input, env = {}) => spawnSync(process.execPath, [hook], {
 });
 
 test('readDangerZones parses the contract format', () => {
-  assert.deepEqual(readDangerZones(proj), ['db/migrations/**', 'generated/**', 'config/prod.json', 'still/in/section/**']);
+  assert.deepEqual(readDangerZones(proj), ['db/migrations/**', 'generated/**', 'config/prod.json', 'config/prod.json/**', 'still/in/section/**']);
   assert.deepEqual(readDangerZones(path.join(proj, 'nope')), []);
 });
 
@@ -167,4 +168,61 @@ test('stdin that is valid JSON but not an object is non-blocking (exit 1)', () =
   const r = runHook('null');
   assert.equal(r.status, 1);
   assert.match(r.stderr, /could not parse hook input/);
+});
+
+test('danger zones accept bare dirs, leading slash and backslashes', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zones '));
+  try {
+    fs.writeFileSync(path.join(dir, 'CLAUDE.md'), [
+      '## Danger zones',
+      '- `vendor` — vendored',
+      '- `/db/migrations/**` — applied',
+      '- `db\\seeds\\**` — seeds',
+      '- `./dist/` — build output',
+    ].join('\n'));
+    assert.deepEqual(readDangerZones(dir), [
+      'vendor', 'vendor/**', 'db/migrations/**', 'db/seeds/**', 'dist/**',
+    ]);
+    assert.match(checkFile('Edit', path.join(dir, 'vendor', 'lib', 'a.js'), dir) ?? '', /danger zone/);
+    assert.match(checkFile('Write', path.join(dir, 'vendor'), dir) ?? '', /danger zone/);
+    assert.match(checkFile('Edit', path.join(dir, 'db', 'migrations', '1.sql'), dir) ?? '', /danger zone/);
+    assert.match(checkFile('Edit', path.join(dir, 'db', 'seeds', 'a', 'b.sql'), dir) ?? '', /danger zone/);
+    assert.equal(checkFile('Edit', path.join(dir, 'vendors', 'a.js'), dir), null);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('more credential stores are secret; public keys and examples are not', () => {
+  const h = os.homedir();
+  for (const p of [
+    path.join(h, '.ssh', 'id_rsa'), path.join(h, '.ssh', 'id_ed25519'),
+    path.join(proj, '.dev.vars'), path.join(proj, 'w', '.dev.vars.production'),
+    path.join(h, '.config', 'gh', 'hosts.yml'), path.join(h, 'AppData', 'Roaming', 'GitHub CLI', 'hosts.yml'),
+    path.join(h, '.git-credentials'), path.join(h, '.netrc'), path.join(h, '_netrc'),
+    path.join(h, '.docker', 'config.json'),
+    path.join(proj, 'infra', 'prod.tfvars'), path.join(proj, 'terraform.tfvars'),
+    path.join(h, '.wrangler', 'config', 'default.toml'),
+  ]) {
+    assert.match(checkFile('Read', p, proj) ?? '', /secret/, `Read ${p}`);
+    assert.match(checkShellSecrets(`cat "${p}"`, proj) ?? '', /secret file/, `cat ${p}`);
+  }
+  for (const p of [
+    path.join(h, '.ssh', 'id_rsa.pub'), path.join(h, '.ssh', 'known_hosts'),
+    path.join(proj, '.dev.vars.example'), path.join(proj, 'prod.tfvars.example'),
+  ]) {
+    assert.equal(checkFile('Read', p, proj), null, `Read ${p}`);
+    assert.equal(checkShellSecrets(`cat "${p}"`, proj), null, `cat ${p}`);
+  }
+  assert.match(checkShellSecrets('cat ~/.ssh/id_rsa', proj) ?? '', /secret file/);
+  assert.equal(checkShellSecrets('cat ~/.ssh/id_rsa.pub', proj), null);
+});
+
+test('shell: jq-style dotted tokens are not key files; real key files still blocked', () => {
+  for (const c of ["jq '.data.key' f.json", 'jq .key f.json', 'jq .cert.pem f.json']) {
+    assert.equal(checkShellSecrets(c, proj), null, c);
+  }
+  for (const c of ['cat server.key', 'cat certs/tls.pem', 'cat ./server.key', 'cat .env.key', 'cat .ssh/id_rsa']) {
+    assert.match(checkShellSecrets(c, proj) ?? '', /secret file/, c);
+  }
 });

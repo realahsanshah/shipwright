@@ -8,17 +8,29 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { toPosix, projectRelative, matchesAny } from './lib/paths.mjs';
 
-// Env files: any `.env*` name is secret unless it is a committed template.
-export const ENV_GLOBS = ['**/.env*'];
-export const ENV_EXCEPTIONS = ['**/.env*.example', '**/.env*.sample', '**/.env*.template'];
-
-// Never exempted.
-export const SECRET_GLOBS = [
-  '**/*.pem', '**/*.key', '**/*.p12', '**/*.pfx',
-  '**/secrets/**', '**/*.tfstate', '**/*.tfstate.backup',
-  '**/.aws/credentials', '**/.aws/sso/cache/**',
-  '**/.config/gcloud/**', '**/AppData/Roaming/gcloud/**',
-  '**/.azure/**', '**/.kube/config',
+// Secret groups. A path is secret when it matches a group's globs and none of that group's
+// exceptions (templates and public keys stay readable). `shellLoose` marks the groups whose
+// bare dotted tokens (jq's `.data.key`) are not treated as files when they appear in a shell command.
+export const SECRET_GROUPS = [
+  { globs: ['**/.env*'], exceptions: ['**/.env*.example', '**/.env*.sample', '**/.env*.template'] },
+  { globs: ['**/.ssh/id_*'], exceptions: ['**/.ssh/id_*.pub'] },
+  { globs: ['**/.dev.vars*'], exceptions: ['**/.dev.vars*.example'] },
+  { globs: ['**/*.tfvars'], exceptions: ['**/*.tfvars.example'] },
+  { globs: ['**/*.pem', '**/*.key'], exceptions: [], shellLoose: true },
+  {
+    globs: [
+      '**/*.p12', '**/*.pfx',
+      '**/secrets/**', '**/*.tfstate', '**/*.tfstate.backup',
+      '**/.aws/credentials', '**/.aws/sso/cache/**',
+      '**/.config/gcloud/**', '**/AppData/Roaming/gcloud/**',
+      '**/.azure/**', '**/.kube/config',
+      '**/.config/gh/hosts.yml', '**/AppData/Roaming/GitHub CLI/hosts.yml',
+      '**/.git-credentials', '**/.netrc', '**/_netrc',
+      '**/.docker/config.json',
+      '**/.wrangler/config/**',
+    ],
+    exceptions: [],
+  },
 ];
 
 const FILE_TOOLS = new Set(['Read', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
@@ -58,8 +70,11 @@ export function readDangerZones(projectDir) {
     if (/^#{1,2}\s/.test(line)) break;
     const m = line.match(/^\s*[-*]\s+`([^`]+)`/);
     if (m) {
-      const glob = m[1].trim().replace(/^\.\//, '');
-      zones.push(glob.endsWith('/') ? `${glob}**` : glob);
+      const glob = m[1].trim().replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+/, '');
+      if (!glob) continue;
+      if (glob.endsWith('/')) zones.push(`${glob}**`);
+      else if (/[*?]/.test(glob)) zones.push(glob);
+      else zones.push(glob, `${glob}/**`); // a bare path protects itself and everything below
     }
   }
   return zones;
@@ -67,9 +82,15 @@ export function readDangerZones(projectDir) {
 
 // True when a path (relative to projectDir, or absolute) is a secret file.
 export function isSecretPath(p, projectDir) {
+  return secretHit(p, projectDir, false);
+}
+
+function secretHit(p, projectDir, shellToken) {
   const abs = toPosix(path.resolve(projectDir, p));
-  if (matchesAny(abs, SECRET_GLOBS)) return true;
-  return matchesAny(abs, ENV_GLOBS) && !matchesAny(abs, ENV_EXCEPTIONS);
+  return SECRET_GROUPS.some((g) => {
+    if (shellToken && g.shellLoose && /^\.[^/\\]*$/.test(p)) return false;
+    return matchesAny(abs, g.globs) && !matchesAny(abs, g.exceptions);
+  });
 }
 
 const SECRET_REASON = 'secret files are never read or edited by Claude. '
@@ -111,7 +132,7 @@ export function checkShellSecrets(command, projectDir) {
     }
     if (!candidate) continue;
     const p = candidate.startsWith('~/') ? path.join(os.homedir(), candidate.slice(2)) : candidate;
-    if (isSecretPath(p, projectDir)) {
+    if (secretHit(p, projectDir, true)) {
       return `Command blocked: it references secret file ${candidate}. `
         + 'Claude never reads secret values; work with references (account_ref) instead.';
     }
