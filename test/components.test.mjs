@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseFrontmatter } from './helpers/frontmatter.mjs';
+import { SPEC_SECTIONS } from '../scripts/lib/delivery-docs.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
@@ -13,10 +14,6 @@ const commands = list('commands', (f) => f.endsWith('.md')).map((f) => `commands
 const agents = list('agents', (f) => f.endsWith('.md')).map((f) => `agents/${f}`);
 const skills = list('skills', (d) => fs.existsSync(path.join(root, 'skills', d, 'SKILL.md'))).map((d) => `skills/${d}/SKILL.md`);
 
-export const SPEC_SECTIONS = [
-  '## Summary', '## Acceptance criteria', '## Affected areas', '## Data changes and migrations',
-  '## Edge cases', '## Test plan', '## Risks', '## Open questions',
-];
 
 for (const file of commands) {
   test(`${file}: description and a Gate section`, () => {
@@ -57,7 +54,10 @@ test('spec-writing skill and spec-critic agent exist and share the spec section 
   assert.ok(skills.includes('skills/spec-writing/SKILL.md'));
   assert.ok(agents.includes('agents/spec-critic.md'));
   const skill = read('skills/spec-writing/SKILL.md');
-  for (const s of SPEC_SECTIONS) assert.ok(skill.includes(s), `spec-writing must list ${s}`);
+  for (const name of SPEC_SECTIONS) {
+    const s = `## ${name}`;
+    assert.ok(skill.includes(s), `spec-writing must list ${s}`);
+  }
   assert.ok(skill.includes('AC-1'));
   assert.ok(skill.includes('${CLAUDE_PLUGIN_ROOT}/skills/spec-writing/examples.md'));
   const critic = read('agents/spec-critic.md');
