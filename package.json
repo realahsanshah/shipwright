@@ -1,0 +1,15 @@
+{
+  "name": "shipwright",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Claude Code plugin: ticket to reviewed PR to deployed release.",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "test": "node --test",
+    "validate": "claude plugin validate ."
+  },
+  "devDependencies": {
+    "ajv": "^8.17.1"
+  }
+}
