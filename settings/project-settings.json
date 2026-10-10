@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(**/.env)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)",
+      "Read(**/secrets/**)",
+      "Read(~/.aws/credentials)",
+      "Read(~/.config/gcloud/**)",
+      "Read(~/.azure/**)",
+      "Read(~/.kube/config)",
+      "Bash(git push --force *)",
+      "Bash(git push -f *)",
+      "Bash(terraform destroy *)",
+      "Bash(kubectl delete namespace *)"
+    ]
+  }
+}
