@@ -305,3 +305,24 @@ test('escaped pipes, alignment separators, BOM and CRLF', () => {
   const crlf = '\uFEFF' + verifyReportText(vSpec2).replace(/\n/g, '\r\n');
   assert.equal(verifyErrors({}, vSpec2, crlf), '');
 });
+
+test('build-log title must match the current plan step title (stale build after replan)', () => {
+  const stale = buildLogText(plan2).replace('## Step 2: Implement AC-2', '## Step 2: Old title from the previous plan');
+  assert.ok(buildErrors({}, stale).includes('Step 2: build-log title "Old title from the previous plan" does not match plan step title "Implement AC-2"'));
+  const padded = buildLogText(plan2).replace('## Step 1: Implement AC-1', '## Step 1:   Implement AC-1   ');
+  assert.equal(buildErrors({}, padded), '');
+});
+
+test('evidence AC cell may be bold or backticked', () => {
+  const bold = verifyReportText(vSpec2).replace('| AC-1 |', '| **AC-1** |').replace('| AC-2 |', '| `AC-2` |');
+  const report = parseVerifyReport(bold);
+  assert.deepEqual(report.evidence.map((e) => e.ac), ['AC-1', 'AC-2']);
+  assert.equal(verifyErrors({}, vSpec2, bold), '');
+});
+
+test('a plan with a "## Gate result" section from a failed /plan run fails check-plan', () => {
+  const failed = `${planText()}\n## Gate result\n\nFAIL: planner blocked (spec contradicts itself).\n`;
+  assert.ok(checkPlan(spec2, parsePlan(failed)).some((e) => /Gate result/.test(e)));
+  const stub = '# Plan: HC-142\n\n## Gate result\n\nFAIL: planner blocked.\n';
+  assert.ok(checkPlan(spec2, parsePlan(stub)).some((e) => /Gate result/.test(e)));
+});

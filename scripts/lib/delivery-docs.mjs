@@ -87,9 +87,11 @@ export function parsePlan(text) {
   const steps = [];
   let step = null;
   let fenced = false;
+  let gateResult = false;
   for (const line of all) {
     if (FENCE.test(line)) { fenced = !fenced; continue; }
     if (fenced) continue;
+    if (/^##\s+Gate result\s*$/.test(line)) gateResult = true;
     const heading = line.match(STEP_HEADING);
     if (heading) {
       step = { n: Number(heading[1]), title: heading[2], covers: null, files: [], test: '', dependsOn: [] };
@@ -106,7 +108,7 @@ export function parsePlan(text) {
     else if (key === 'test') step.test = value;
     else step.dependsOn = NONE.test(value) ? [] : [...value.matchAll(/\d+/g)].map((m) => Number(m[0]));
   }
-  return { specLine, steps };
+  return { specLine, steps, gateResult };
 }
 
 export function checkPlan(spec, plan) {
@@ -114,6 +116,7 @@ export function checkPlan(spec, plan) {
   if (spec.approved && !(plan.specLine ?? '').includes(`approved by ${spec.approver} on ${spec.approvedOn}`)) {
     errors.push('plan "Spec:" line does not match the current spec approval; rerun /plan');
   }
+  if (plan.gateResult) errors.push('plan still has a "## Gate result" section from a failed /plan run; rerun /plan');
   if (plan.steps.length === 0) errors.push('plan has no "### Step N: <title>" headings');
   const known = new Set(spec.acIds);
   const covered = new Set();
@@ -177,6 +180,9 @@ export function checkBuild(plan, log) {
     if (entries.length === 0) { errors.push(`${label}: no entry in build log`); continue; }
     if (entries.length > 1) errors.push(`${label}: listed more than once in build log`);
     const entry = entries[entries.length - 1];
+    const logTitle = entry.title.trim();
+    const planTitle = step.title.trim();
+    if (logTitle !== planTitle) errors.push(`${label}: build-log title "${logTitle}" does not match plan step title "${planTitle}"`);
     if (entry.status !== 'DONE') errors.push(`${label}: status is ${entry.status || 'missing'}, not DONE`);
     if (!SHA.test(entry.commit)) errors.push(`${label}: missing or invalid commit SHA`);
     if (!entry.green) errors.push(`${label}: missing GREEN evidence`);
@@ -218,7 +224,7 @@ export function parseVerifyReport(text) {
     checks: tableRows(sections.get('Checks') ?? []).map(([name = '', command = '', result = '', notes = '']) => (
       { name: name.toLowerCase(), command, result: result.toUpperCase(), notes })),
     evidence: tableRows(sections.get('Acceptance criteria evidence') ?? []).map(([ac = '', evidence = '', result = '']) => (
-      { ac, evidence, result: result.toUpperCase() })),
+      { ac: ac.replace(/\*\*|`/g, '').trim(), evidence, result: result.toUpperCase() })),
   };
 }
 
