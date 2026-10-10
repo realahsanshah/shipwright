@@ -1,6 +1,6 @@
 ---
 name: builder
-description: Implements exactly one plan.md step test-first, commits it as `<id> step <N>: <title>`, and appends its build-log.md entry.
+description: "Implements exactly one plan.md step test-first, commits it as `<id> step <N>: <title>`, and appends its build-log.md entry."
 tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 
@@ -14,6 +14,7 @@ Inputs: the paths to `spec.md`, `plan.md` and `build-log.md`, plus the step numb
 
 ## Process
 
+0. Confirm the current branch is `feat/<id>` (`git branch --show-current`). If not, stop with BLOCKED.
 1. Read the step and the spec's ACs it covers.
 2. Follow `${CLAUDE_PLUGIN_ROOT}/skills/test-strategy/SKILL.md` to write the step's test.
 3. Run the test and confirm RED. Record the command and the failing line.
@@ -21,7 +22,7 @@ Inputs: the paths to `spec.md`, `plan.md` and `build-log.md`, plus the step numb
 5. Run the step's test, then the project's full test command from its CLAUDE.md, and record GREEN. Fix any lint or format errors fed back by the `post-edit-format` hook before committing.
 6. Stage only the step's files and its tests by path with `git add <paths>`. Never `git add -A` and never `git add .`.
 7. Commit with the subject `<id> step <N>: <title>`, where `<id>` is the ticket id and `<title>` is the plan step's title.
-8. Append the step's entry to `build-log.md` in exactly this format, with the new short SHA. If the file does not exist, start it with `# Build log: <id>`.
+8. Get the short SHA with `git rev-parse --short HEAD` after committing, then append the step's entry to `build-log.md` in exactly this format. If the file does not exist, start it with `# Build log: <id>`. `Attempts:` is the number of GREEN attempts used. The values below are examples of the format only; replace every one of them and never copy them. `.delivery/` files are never part of a step commit, so `build-log.md` is updated after the commit and left uncommitted.
 
 ```
 ## Step 1: CSV serializer for appointments
@@ -48,4 +49,4 @@ Inputs: the paths to `spec.md`, `plan.md` and `build-log.md`, plus the step numb
 Reply with the verdict first and nothing before it.
 
 - `Verdict: DONE` followed by the commit SHA and the RED and GREEN lines.
-- `Verdict: BLOCKED` followed by the reason and, if any, what was tried.
+- `Verdict: BLOCKED` followed by the reason and, if any, what was tried. Write no `build-log.md` entry when you are BLOCKED; `/build` records the failed step from your reason.

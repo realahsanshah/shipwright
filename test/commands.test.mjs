@@ -76,3 +76,30 @@ test('/plan: embedded template parses with parsePlan', async () => {
     assert.ok(s.test && s.test.length > 0);
   }
 });
+
+test('/build: entry gate, branch, builder in both modes, rules, check-build gate', () => {
+  const md = read('commands/build.md');
+  for (const phrase of [
+    'check-plan.mjs', 'check-build.mjs',
+    'feat/<id>', '<id> step <N>: <title>',
+    'build-log.md', '${CLAUDE_PLUGIN_ROOT}/agents/builder.md',
+    'RED', 'GREEN',
+    '3 attempts', 'danger zone', 'one commit per step',
+  ]) assert.ok(md.includes(phrase), `build.md must mention "${phrase}"`);
+  assert.match(md, /never push|do not push/i);
+  assert.match(md, /never[^.\n]*git add -A|do not[^.\n]*git add -A/i);
+});
+
+test('/build: embedded template parses with parseBuildLog', async () => {
+  const { parseBuildLog } = await import('../scripts/lib/delivery-docs.mjs');
+  const md = read('commands/build.md');
+  const m = md.match(/```markdown\r?\n([\s\S]*?)```/);
+  assert.ok(m, 'build.md must contain a ```markdown block');
+  const log = parseBuildLog(m[1]);
+  assert.ok(log.steps.length >= 1);
+  const s = log.steps[0];
+  assert.equal(s.status, 'DONE');
+  assert.ok(s.commit);
+  assert.ok(s.red);
+  assert.ok(s.green);
+});
