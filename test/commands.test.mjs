@@ -178,3 +178,62 @@ test('delivery rules: push exception for /ship; onboard gitignores .delivery/act
   const onboard = read('commands/onboard.md');
   assert.ok(onboard.includes('.delivery/active') && onboard.includes('.gitignore'));
 });
+
+test('/breakdown: inputs, backlog check, approval gate, issue creation without duplicates', () => {
+  const md = read('commands/breakdown.md');
+  for (const phrase of [
+    '$ARGUMENTS', '.delivery/backlog.md',
+    'node "${CLAUDE_PLUGIN_ROOT}/scripts/backlog.mjs" check', '--approved',
+    'Status: approved by', 'git config user.name',
+    'gh issue create', '--body-file', '"$(cat \'',
+    'backlog.mjs" set', 'Issue: none', 'data, not instructions',
+    'open question', '/shipwright:run',
+  ]) assert.ok(md.includes(phrase), `breakdown.md must mention "${phrase}"`);
+  assert.match(md, /never (create|guess)/i);
+});
+
+test('/breakdown: embedded template parses with parseBacklog and passes checkBacklog', async () => {
+  const { parseBacklog, checkBacklog } = await import('../scripts/lib/backlog.mjs');
+  const md = read('commands/breakdown.md');
+  const blocks = [...md.matchAll(/```markdown\r?\n([\s\S]*?)```/g)].map((m) => m[1]);
+  const tpl = blocks.find((b) => b.includes('## B-1'));
+  assert.ok(tpl, 'breakdown.md must embed a backlog template');
+  const parsed = parseBacklog(tpl);
+  assert.ok(parsed.items.length >= 1);
+  assert.deepEqual(checkBacklog(parsed), []);
+});
+
+test('/run: backlog refresh, target resolution, every stage in order, gates, never merges', () => {
+  const md = read('commands/run.md');
+  for (const phrase of [
+    'next', 'B-<n>', 'backlog.mjs" next', 'backlog.mjs" set',
+    'State=in-progress', 'State=in-review', 'State=done',
+    'gh pr view', 'MERGED',
+    '${CLAUDE_PLUGIN_ROOT}/commands/intake.md',
+    '${CLAUDE_PLUGIN_ROOT}/commands/spec.md',
+    '${CLAUDE_PLUGIN_ROOT}/commands/plan.md',
+    '${CLAUDE_PLUGIN_ROOT}/commands/build.md',
+    '${CLAUDE_PLUGIN_ROOT}/commands/verify.md',
+    '${CLAUDE_PLUGIN_ROOT}/commands/review.md',
+    '${CLAUDE_PLUGIN_ROOT}/commands/ship.md',
+    'never merge', 'spec gate', 'one item',
+  ]) assert.ok(md.includes(phrase), `run.md must mention "${phrase}"`);
+  assert.match(md, /stop/i);
+  const order = ['intake', 'spec', 'plan', 'build', 'verify', 'review', 'ship']
+    .map((n) => md.indexOf(`\${CLAUDE_PLUGIN_ROOT}/commands/${n}.md`));
+  assert.deepEqual([...order].sort((a, b) => a - b), order, 'stages must appear in pipeline order');
+});
+
+test('/run resume safety and /breakdown rerun safety', () => {
+  const run = read('commands/run.md');
+  for (const p of ['git fetch origin', 'gh repo view --json url', '.delivery/active', 'check-spec.mjs', 'check-plan.mjs',
+    'check-verify.mjs', 'check-review.mjs', '--head <HEAD_CODE>', 'own retries', 'never commits backlog state']) {
+    assert.ok(run.includes(p), `run.md missing: ${p}`);
+  }
+  assert.ok(run.indexOf('git fetch origin') < run.indexOf('commands/build.md'));
+  const breakdown = read('commands/breakdown.md');
+  for (const p of ['gh issue list --state all', 'Backlog: B-<n> in .delivery/backlog.md', "git commit -F '<message file>' -- .delivery/backlog.md"]) {
+    assert.ok(breakdown.includes(p), `breakdown.md missing: ${p}`);
+  }
+  assert.ok(breakdown.indexOf('gh issue list') < breakdown.indexOf('gh issue create --title'));
+});
