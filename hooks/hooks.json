@@ -15,6 +15,14 @@
         ]
       }
     ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/post-edit-format.mjs\"", "timeout": 90 }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
