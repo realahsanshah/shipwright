@@ -127,8 +127,8 @@ test('/verify: embedded template parses with parseVerifyReport', async () => {
   const r = parseVerifyReport(m[1]);
   assert.equal(r.status, 'PASS');
   assert.equal(r.attempts, 1);
-  for (const c of REQUIRED_CHECKS) {
-    assert.ok(JSON.stringify(r).toLowerCase().includes(c), `template must include check ${c}`);
-  }
+  const names = r.checks.map((c) => c.name);
+  for (const c of REQUIRED_CHECKS) assert.ok(names.includes(c), `template must include check ${c}`);
+  assert.ok(r.checks.find((c) => c.name === 'secret scan').command.includes('secret-scan.mjs'));
   assert.ok(r.evidence.length >= 1);
 });
