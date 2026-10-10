@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { specText, planText, buildLogText, verifyReportText } from './helpers/delivery-fixtures.mjs';
+import { specText, planText, buildLogText, verifyReportText, reviewText, prDescriptionText } from './helpers/delivery-fixtures.mjs';
 import { parsePlan, parseSpec } from '../scripts/lib/delivery-docs.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -73,4 +73,29 @@ test('check-verify: PASS exits 0, consistent FAIL exits 1, inconsistent exits 1,
   assert.equal(bad.status, 1);
   assert.match(bad.stdout, /missing check "lint"/);
   assert.equal(run('check-verify.mjs', specFile).status, 2);
+});
+
+test('check-review: valid exits 0, FAIL verify and stale commits exit 1, usage exits 2', () => {
+  const spec = parseSpec(specText());
+  const specFile = write('spec5.md', specText());
+  const verifyFile = write('verify5.md', verifyReportText(spec));
+  const reviewFile = write('review5.md', reviewText());
+  const prFile = write('pr5.md', prDescriptionText(spec));
+  const good = run('check-review.mjs', specFile, verifyFile, reviewFile, prFile);
+  assert.equal(good.status, 0, good.stdout);
+  assert.match(good.stdout, /^ok: /);
+  assert.equal(run('check-review.mjs', specFile, verifyFile, reviewFile, prFile, '--head', '9e05129').status, 0);
+
+  const failedVerify = write('verify5-fail.md', verifyReportText(spec, { status: 'FAIL', checks: { tests: { result: 'FAIL' } } }));
+  const failed = run('check-review.mjs', specFile, failedVerify, reviewFile, prFile);
+  assert.equal(failed.status, 1);
+  assert.match(failed.stdout, /^ {2}- verify: /m);
+
+  const stale = run('check-review.mjs', specFile, verifyFile, reviewFile, prFile, '--head', 'deadbee');
+  assert.equal(stale.status, 1);
+  assert.match(stale.stdout, /verify-report Commit .* is stale/);
+  assert.match(stale.stdout, /review Commit .* is stale/);
+
+  assert.equal(run('check-review.mjs', specFile, verifyFile, reviewFile).status, 2);
+  assert.equal(run('check-review.mjs', specFile, verifyFile, reviewFile, prFile, '--head').status, 2);
 });

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseSpec, checkSpec, SPEC_SECTIONS, parsePlan, checkPlan, parseBuildLog, checkBuild, parseVerifyReport, checkVerify } from '../scripts/lib/delivery-docs.mjs';
-import { specText, planText, buildLogText, verifyReportText } from './helpers/delivery-fixtures.mjs';
+import { parseSpec, checkSpec, SPEC_SECTIONS, parsePlan, checkPlan, parseBuildLog, checkBuild, parseVerifyReport, checkVerify, parseReview, checkReview, parsePrDescription, checkPrDescription, sameCommit } from '../scripts/lib/delivery-docs.mjs';
+import { specText, planText, buildLogText, verifyReportText, reviewText, prDescriptionText } from './helpers/delivery-fixtures.mjs';
 
 test('valid spec parses and passes', () => {
   const s = parseSpec(specText());
@@ -325,4 +325,100 @@ test('a plan with a "## Gate result" section from a failed /plan run fails check
   assert.ok(checkPlan(spec2, parsePlan(failed)).some((e) => /Gate result/.test(e)));
   const stub = '# Plan: HC-142\n\n## Gate result\n\nFAIL: planner blocked.\n';
   assert.ok(checkPlan(spec2, parsePlan(stub)).some((e) => /Gate result/.test(e)));
+});
+
+// --- review.md and pr-description.md ---
+const spec1 = parseSpec(specText({ acs: ['AC-1'] }));
+const reviewErrors = (text) => checkReview(parseReview(text));
+const prErrors = (text, spec = spec2) => checkPrDescription(spec, parsePrDescription(text));
+
+test('contract templates pass as given', () => {
+  assert.deepEqual(reviewErrors(reviewText()), []);
+  const template = `# Export appointments to CSV (HC-142)
+
+Closes: https://jira.example.com/browse/HC-142
+
+## Summary
+
+Admins can export the filtered appointments list as CSV.
+
+## Acceptance criteria
+
+| AC | Evidence |
+|---|---|
+| AC-1 | \`api/tests/test_export_endpoint.py::test_export_respects_filters\` passed |
+
+## Test plan
+
+- \`npm test\`: 56 passed
+
+## Risks
+
+None.
+
+## Notes for CLAUDE.md
+
+None.
+`;
+  assert.deepEqual(prErrors(template, spec1), []);
+  assert.deepEqual(prErrors(prDescriptionText(spec2)), []);
+});
+
+test('review preamble lines are each required', () => {
+  assert.ok(reviewErrors(reviewText({ commit: null })).some((e) => /Commit/.test(e)));
+  assert.ok(reviewErrors(reviewText({ status: null })).some((e) => /Status/.test(e)));
+  assert.ok(reviewErrors(reviewText({ mode: null })).some((e) => /Mode/.test(e)));
+  assert.ok(reviewErrors(reviewText({ mode: 'fleet' })).some((e) => /Mode/.test(e)));
+});
+
+test('review sections and verdicts', () => {
+  const noSecurity = reviewText().replace('## Security review', '### Security review');
+  assert.ok(reviewErrors(noSecurity).includes('missing section "## Security review"'));
+  const noVerdict = reviewText({ security: 'None.' });
+  assert.ok(reviewErrors(noVerdict).some((e) => /Security review: missing "Verdict/.test(e)));
+  const oddVerdict = reviewText({ security: 'Verdict: MAYBE\n\nNone.' });
+  assert.ok(reviewErrors(oddVerdict).some((e) => /Security review: missing "Verdict/.test(e)));
+});
+
+test('review verdict must agree with its findings and the status', () => {
+  const passWithBlocking = reviewText({ code: 'Verdict: PASS\n\n- [blocking] a.js:1 — bad → fix' });
+  assert.match(reviewErrors(passWithBlocking).join('\n'), /says PASS but has a blocking finding/);
+  const blockingWithout = reviewText({ code: 'Verdict: BLOCKING\n\n- [non-blocking] a.js:1 — nit → fix' });
+  assert.match(reviewErrors(blockingWithout).join('\n'), /says BLOCKING but/);
+  const passStatusBlocked = reviewText({ code: 'Verdict: BLOCKING\n\n- [blocking] a.js:1 — bad → fix' });
+  assert.match(reviewErrors(passStatusBlocked).join('\n'), /Status: PASS but a reviewer is BLOCKING/);
+  assert.match(reviewErrors(reviewText({ status: 'FAIL' })).join('\n'), /Status: FAIL but both reviewers PASS/);
+  const consistentFail = reviewText({ status: 'FAIL', code: 'Verdict: BLOCKING\n\n- [blocking] a.js:1 — bad → fix' });
+  assert.match(reviewErrors(consistentFail).join('\n'), /review status is FAIL/);
+});
+
+test('"None." is an empty findings list and CRLF/BOM parse', () => {
+  const review = parseReview(reviewText());
+  assert.deepEqual(review.sections.get('Security review').findings, []);
+  assert.equal(review.sections.get('Code review').findings[0].severity, 'non-blocking');
+  assert.equal(review.commit, '9e05129');
+  assert.deepEqual(reviewErrors('\uFEFF' + reviewText().replace(/\n/g, '\r\n')), []);
+});
+
+test('pr-description: title, Closes and sections are each required', () => {
+  assert.ok(prErrors(prDescriptionText(spec2, { title: null })).some((e) => /# <title>/.test(e)));
+  assert.ok(prErrors(prDescriptionText(spec2, { closes: null })).some((e) => /Closes/.test(e)));
+  for (const name of ['Summary', 'Acceptance criteria', 'Test plan', 'Risks', 'Notes for CLAUDE.md']) {
+    const text = prDescriptionText(spec2).replace(new RegExp(`^## ${name}$`, 'm'), '### gone');
+    assert.ok(prErrors(text).includes(`missing section "## ${name}"`), name);
+  }
+});
+
+test('pr-description: AC rows', () => {
+  assert.ok(prErrors(prDescriptionText(spec2, { rows: ['| AC-1 | passed |'] })).includes('AC-2: no row in Acceptance criteria'));
+  assert.ok(prErrors(prDescriptionText(spec2, { rows: ['| AC-1 | passed |', '| AC-2 |  |'] })).includes('AC-2: evidence is empty'));
+  assert.ok(prErrors(prDescriptionText(spec2, { rows: ['| AC-1 | x |', '| AC-2 | x |', '| AC-9 | x |'] })).some((e) => /AC-9, which is not in the spec/.test(e)));
+  assert.deepEqual(prErrors(prDescriptionText(spec2, { rows: ['| **AC-1** | ok |', '| `AC-2` | ok |'] })), []);
+});
+
+test('sameCommit compares by prefix, case-insensitively', () => {
+  assert.equal(sameCommit('9e05129', '9e05129abcdef0123'), true);
+  assert.equal(sameCommit('ABC1234', 'abc1234'), true);
+  assert.equal(sameCommit('9e05129', '1111111'), false);
+  assert.equal(sameCommit(null, '9e05129'), false);
 });

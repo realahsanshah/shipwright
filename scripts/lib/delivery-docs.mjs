@@ -261,3 +261,90 @@ export function checkVerify(spec, report) {
   if (report.status === 'FAIL' && !failed && errors.length === 0) errors.push('report says Status: FAIL but every check and criterion passed');
   return { errors, outcome };
 }
+
+export const REVIEW_SECTIONS = ['Code review', 'Security review'];
+export const PR_SECTIONS = ['Summary', 'Acceptance criteria', 'Test plan', 'Risks', 'Notes for CLAUDE.md'];
+const FINDING = /^\s*[-*]\s+\[(blocking|non-blocking)\]\s*(.*)$/i;
+
+function preambleField(preamble, name) {
+  for (const line of preamble) {
+    const m = line.match(new RegExp(`^${name}:\\s*(.*?)\\s*$`));
+    if (m) return m[1].replace(/`/g, '');
+  }
+  return null;
+}
+
+export function sameCommit(a, b) {
+  if (!a || !b) return false;
+  const x = a.toLowerCase();
+  const y = b.toLowerCase();
+  return x.startsWith(y) || y.startsWith(x);
+}
+
+export function parseReview(text) {
+  const { preamble, sections } = splitSections(text);
+  const parsed = new Map();
+  for (const name of REVIEW_SECTIONS) {
+    if (!sections.has(name)) continue;
+    let verdict = null;
+    const findings = [];
+    for (const line of sections.get(name)) {
+      const v = line.match(/^Verdict:\s*(\S+)\s*$/);
+      if (v && verdict === null) verdict = v[1].toUpperCase();
+      const f = line.match(FINDING);
+      if (f) findings.push({ severity: f[1].toLowerCase(), text: f[2] });
+    }
+    parsed.set(name, { verdict, findings });
+  }
+  return {
+    commit: preambleField(preamble, 'Commit'),
+    status: preambleField(preamble, 'Status'),
+    mode: preambleField(preamble, 'Mode'),
+    sections: parsed,
+  };
+}
+
+export function checkReview(review) {
+  const errors = [];
+  if (!review.commit || !SHA.test(review.commit)) errors.push('missing "Commit: <sha>" line');
+  if (!['PASS', 'FAIL'].includes(review.status)) errors.push('missing "Status: PASS" or "Status: FAIL" line');
+  if (!['agents', 'solo'].includes(review.mode)) errors.push('missing "Mode: agents" or "Mode: solo" line');
+  let allPass = true;
+  for (const name of REVIEW_SECTIONS) {
+    const section = review.sections.get(name);
+    if (!section) { errors.push(`missing section "## ${name}"`); allPass = false; continue; }
+    const blocking = section.findings.some((f) => f.severity === 'blocking');
+    if (!['PASS', 'BLOCKING'].includes(section.verdict)) { errors.push(`${name}: missing "Verdict: PASS" or "Verdict: BLOCKING"`); allPass = false; continue; }
+    if (section.verdict === 'PASS' && blocking) errors.push(`${name}: says PASS but has a blocking finding`);
+    if (section.verdict === 'BLOCKING' && !blocking) errors.push(`${name}: says BLOCKING but lists no [blocking] finding`);
+    if (section.verdict !== 'PASS' || blocking) allPass = false;
+  }
+  if (review.status === 'PASS' && !allPass) errors.push('review says Status: PASS but a reviewer is BLOCKING');
+  if (review.status === 'FAIL' && allPass && errors.length === 0) errors.push('review says Status: FAIL but both reviewers PASS');
+  if (review.status === 'FAIL' && errors.length === 0) errors.push('review status is FAIL: fix the blocking findings and rerun /review');
+  return errors;
+}
+
+export function parsePrDescription(text) {
+  const { preamble, sections, order } = splitSections(text);
+  const title = preamble.find((l) => /^#\s+\S/.test(l))?.replace(/^#\s+/, '').trim() ?? null;
+  const closes = preambleField(preamble, 'Closes');
+  const acRows = tableRows(sections.get('Acceptance criteria') ?? []).map(([ac = '', evidence = '']) => (
+    { ac: ac.replace(/[*`]/g, '').trim(), evidence }));
+  return { title, closes, order, acRows };
+}
+
+export function checkPrDescription(spec, pr) {
+  const errors = [];
+  if (!pr.title) errors.push('missing "# <title>" line');
+  if (!pr.closes) errors.push('missing "Closes: <ticket link>" line');
+  for (const s of PR_SECTIONS) if (!pr.order.includes(s)) errors.push(`missing section "## ${s}"`);
+  const known = new Set(spec.acIds);
+  for (const id of spec.acIds) {
+    const rows = pr.acRows.filter((r) => r.ac === id);
+    if (rows.length === 0) errors.push(`${id}: no row in Acceptance criteria`);
+    if (rows.some((r) => !r.evidence)) errors.push(`${id}: evidence is empty`);
+  }
+  for (const r of pr.acRows) if (!known.has(r.ac)) errors.push(`Acceptance criteria row for ${r.ac || '(blank)'}, which is not in the spec`);
+  return errors;
+}
