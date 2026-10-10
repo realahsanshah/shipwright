@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { parseBacklog, checkBacklog, nextItem, setFields } from '../scripts/lib/backlog.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const template = fs.readFileSync(path.join(root, 'test', 'fixtures', 'backlog', 'approved.md'), 'utf8');
+const template = fs.readFileSync(path.join(root, 'test', 'fixtures', 'backlog', 'approved.md'), 'utf8').replace(/\r\n/g, '\n'); // LF whatever core.autocrlf did; CRLF is tested explicitly
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'backlog cli '));
 after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 const write = (name, text) => {
