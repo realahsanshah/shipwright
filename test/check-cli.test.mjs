@@ -1,15 +1,16 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { specText } from './helpers/delivery-fixtures.mjs';
+import { specText, planText } from './helpers/delivery-fixtures.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'check cli '));
-const write = (name, text) => {
+after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+const write =(name, text) => {
   const f = path.join(tmp, name);
   fs.writeFileSync(f, text);
   return f;
@@ -32,4 +33,15 @@ test('check-spec: draft exits 1', () => {
 test('check-spec: usage and missing file exit 2', () => {
   assert.equal(run('check-spec.mjs').status, 2);
   assert.equal(run('check-spec.mjs', path.join(tmp, 'nope.md')).status, 2);
+});
+
+test('check-plan: valid exits 0, invalid exits 1, usage exits 2', () => {
+  const spec = write('spec2.md', specText());
+  const good = run('check-plan.mjs', spec, write('plan.md', planText()));
+  assert.equal(good.status, 0);
+  assert.match(good.stdout, /^ok: /);
+  const bad = run('check-plan.mjs', spec, write('bad-plan.md', planText({ steps: '' })));
+  assert.equal(bad.status, 1);
+  assert.match(bad.stdout, /^failed: /);
+  assert.equal(run('check-plan.mjs', spec).status, 2);
 });
