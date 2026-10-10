@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -10,6 +10,7 @@ const cli = fileURLToPath(new URL('../scripts/validate.mjs', import.meta.url));
 const fixture = (n) => fileURLToPath(new URL(`./fixtures/tickets/${n}`, import.meta.url));
 const run = (...args) => spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8' });
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'shipwright validate '));
+after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
 test('valid ticket exits 0', () => {
   const r = run('ticket', fixture('valid-doc-example.json'));

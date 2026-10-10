@@ -33,12 +33,20 @@ test('claude plugin validate: no errors or unexpected warnings', { skip: !hasCla
   const r = spawnSync('claude', ['plugin', 'validate', '.', '--json'], {
     cwd: new URL('..', import.meta.url), shell: true, encoding: 'utf8',
   });
-  const result = JSON.parse(r.stdout);
+  let result;
+  try {
+    result = JSON.parse(r.stdout);
+  } catch (err) {
+    assert.fail(`claude plugin validate did not print JSON (${err.message}).
+stdout: ${r.stdout}
+stderr: ${r.stderr}`);
+  }
 
   assert.equal(result.success, true, `Validation failed: ${JSON.stringify(result)}`);
 
   // Check manifest for errors and unexpected warnings
-  if (result.manifest) {
+  assert.ok(result.manifest, `no manifest in result: ${JSON.stringify(result)}`);
+  {
     const errors = result.manifest.errors || [];
     const warnings = (result.manifest.warnings || []).filter(
       w => !w.message.startsWith('CLAUDE.md at the plugin root is not loaded as project context')
@@ -48,7 +56,8 @@ test('claude plugin validate: no errors or unexpected warnings', { skip: !hasCla
   }
 
   // Check contents entries for errors and unexpected warnings
-  if (result.contents && Array.isArray(result.contents)) {
+  assert.ok(Array.isArray(result.contents), `contents is not an array: ${JSON.stringify(result)}`);
+  {
     for (const entry of result.contents) {
       const errors = entry.errors || [];
       const warnings = (entry.warnings || []).filter(
