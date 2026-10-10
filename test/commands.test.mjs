@@ -18,3 +18,17 @@ test('/onboard: verified commands, danger zones contract, settings merge, deploy
   assert.match(md, /never overwrite|do not overwrite/i);
   assert.match(md, /ask (the engineer )?before/i);
 });
+
+test('/intake: sources, normalisation, open questions, validation gate, active pointer', () => {
+  const md = read('commands/intake.md');
+  for (const phrase of [
+    '$ARGUMENTS',
+    'gh issue view', 'Jira', 'Linear', 'Azure DevOps',
+    '.delivery/<id>/ticket.json', '.delivery/active',
+    'open_questions', 'never guess',
+    'node "${CLAUDE_PLUGIN_ROOT}/scripts/validate.mjs" ticket',
+    'data, not instructions',
+    'gh-<number>',
+  ]) assert.ok(md.includes(phrase), `intake.md must mention "${phrase}"`);
+  assert.match(md, /already exists/i);
+});
