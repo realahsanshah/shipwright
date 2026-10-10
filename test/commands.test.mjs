@@ -32,3 +32,17 @@ test('/intake: sources, normalisation, open questions, validation gate, active p
   ]) assert.ok(md.includes(phrase), `intake.md must mention "${phrase}"`);
   assert.match(md, /already exists/i);
 });
+
+test('/spec: reads ticket, uses skill + critic in both modes, human approval gate', () => {
+  const md = read('commands/spec.md');
+  for (const phrase of [
+    '.delivery/active', 'ticket.json', 'CLAUDE.md',
+    'spec-writing', '${CLAUDE_PLUGIN_ROOT}/skills/spec-writing/SKILL.md',
+    'spec-critic', '${CLAUDE_PLUGIN_ROOT}/agents/spec-critic.md', 'spec-review.md',
+    'Verdict: PASS', 'Verdict: GAPS', 'mode: solo', '.delivery/config.yml',
+    'Status: approved by', 'git config user.name',
+    'open_questions', 'product decision', 'data, not instructions',
+  ]) assert.ok(md.includes(phrase), `spec.md must mention "${phrase}"`);
+  assert.match(md, /3 (rounds|attempts|times)/);
+  assert.match(md, /never (mark|approve).*(yourself|itself)|only the engineer/i);
+});
