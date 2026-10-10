@@ -24,7 +24,8 @@ test('hooks.json wires SessionStart and keeps PreToolUse', () => {
   const cfg = JSON.parse(fs.readFileSync(new URL('../hooks/hooks.json', import.meta.url), 'utf8'));
   assert.match(cfg.hooks.SessionStart[0].hooks[0].command, /session-start\.mjs/);
   assert.match(cfg.hooks.PreToolUse[0].hooks[0].command, /pre-tool-guard\.mjs/);
-  const matcher = cfg.hooks.PreToolUse[0].matcher.split('|');
+  assert.match(cfg.hooks.Stop[0].hooks[0].command, /stop-gate\.mjs/);
+  const matcher =cfg.hooks.PreToolUse[0].matcher.split('|');
   for (const tool of ['Read', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Grep', 'Bash', 'PowerShell']) {
     assert.ok(matcher.includes(tool), `PreToolUse matcher must include ${tool}`);
   }
