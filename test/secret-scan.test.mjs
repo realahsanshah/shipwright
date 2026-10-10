@@ -225,3 +225,73 @@ test('CLI: large untracked file is skipped and counted', () => {
   assert.equal(r.status, 0, r.stdout);
   assert.match(r.stdout, /clean \(1 files scanned, 1 large file skipped\)/);
 });
+
+// ---- generic-assignment: prefixed names and unquoted values (values built at runtime) ----
+const LONG = 'Zq8' + 'v1Rk' + 'T7mW' + 'p2Lx' + 'N4cB';
+test('generic-assignment catches prefixed and env-style names', () => {
+  const hit = (t) => scanLines('f', [{ line: 1, text: t }]).map((x) => x.rule);
+  const PW = 'PASS' + 'WORD';
+  assert.deepEqual(hit(`DB_${PW} = "${LONG}"`), ['generic-assignment']);
+  assert.deepEqual(hit(`AWS_${'SEC' + 'RET'}_ACCESS_KEY="${LONG}"`), ['generic-assignment']);
+  assert.deepEqual(hit(`GITHUB_${'TOK' + 'EN'}: "${LONG}"`), ['generic-assignment']);
+  assert.deepEqual(hit(`${PW_KEY}: ${LONG}`), ['generic-assignment']);
+  assert.deepEqual(hit(`${'API' + '_KEY'}=${LONG}`), ['generic-assignment']);
+});
+
+test('generic-assignment ignores placeholders, short unquoted values and code', () => {
+  const hit = (t) => scanLines('f', [{ line: 1, text: t }]).length;
+  assert.equal(hit(`${PW_KEY} = "change` + 'me"'), 0);
+  assert.equal(hit('tok' + 'en: ${TOKEN}'), 0);
+  assert.equal(hit('api_' + 'key: <your-key>'), 0);
+  assert.equal(hit(`${PW_KEY}: ` + 'hunt' + 'er2'), 0);
+  assert.equal(hit(`${PW_KEY}_hash = compute(x)`), 0);
+  assert.equal(hit('const tok' + 'en = response.data.accessToken;'), 0);
+  assert.equal(hit('tok' + 'en = jwt.encode(payload, key)'), 0);
+  assert.equal(hit('sec' + 'ret: ${{ secrets.DEPLOY_KEY_FOR_PROD }}'), 0);
+});
+
+// ---- branch history ----
+test('CLI: a secret committed and removed later on the branch is found with its commit', () => {
+  const root = makeRepo();
+  commitFile(root, 'cfg.js', `x\nconst t = "${GH}";\n`);
+  const first = spawnSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim();
+  commitFile(root, 'cfg.js', 'x\n');
+  const r = run(['--base', 'main'], root);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.ok(r.stdout.includes(`  - cfg.js:2 github-token (commit ${first})`), r.stdout);
+  assert.match(r.stdout, /1 finding\(s\)/);
+  assert.ok(!(r.stdout + r.stderr).includes(GH));
+});
+
+test('CLI: a secret file added and deleted later on the branch is found', () => {
+  const root = makeRepo();
+  commitFile(root, '.env.production', 'A=1\n');
+  fs.rmSync(path.join(root, '.env.production'));
+  git(root, 'add', '-A');
+  git(root, 'commit', '-m', 'rm');
+  const r = run(['--base', 'main'], root);
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stdout, /\.env\.production:0 secret-file \(commit [0-9a-f]{7,}\)/);
+});
+
+test('CLI: --base starting with "-" is rejected with exit 2', () => {
+  const root = makeRepo();
+  const r = run(['--base', '--output=x'], root);
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /--base/);
+});
+
+test('CLI: a history hit whose line is still present with the allow marker is acknowledged', () => {
+  const root = makeRepo();
+  const line = `example: \`${PW_KEY} = "hunter2` + 'hunter2"`';
+  commitFile(root, 'doc.md', `${line}\n`);
+  commitFile(root, 'doc.md', `${line} (shipwright:allow-secret)\n`);
+  const r = run(['--base', 'main'], root);
+  assert.equal(r.status, 0, r.stdout);
+  // the marker must not acknowledge a different line
+  commitFile(root, 'doc.md', `${line} (shipwright:allow-secret)\nother ${GH}\n`);
+  commitFile(root, 'doc.md', `${line} (shipwright:allow-secret)\n`);
+  const r2 = run(['--base', 'main'], root);
+  assert.equal(r2.status, 1, r2.stdout);
+  assert.match(r2.stdout, /doc\.md:2 github-token \(commit [0-9a-f]+\)/);
+});

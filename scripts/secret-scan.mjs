@@ -1,7 +1,9 @@
 #!/usr/bin/env node
-// Scans the branch's changes (committed since the merge-base, uncommitted, and
-// untracked) for credentials. Prints file:line and rule only, never the value.
-// File identity comes from `git diff --name-status`, never from diff headers.
+// Scans the branch's changes (net diff since the merge-base, uncommitted, and
+// untracked) and the added lines of every commit on the branch (so a secret
+// committed and later removed is still caught) for credentials. Prints
+// file:line and rule only, never the value. File identity comes from
+// `--name-status`, never from diff headers.
 // Usage: node secret-scan.mjs [--base <ref>]   (run from the repo root)
 import fs from 'node:fs';
 import path from 'node:path';
@@ -18,10 +20,13 @@ export const RULES = [
   { id: 'google-api-key', re: /\bAIza[0-9A-Za-z_-]{35}\b/ },
   { id: 'stripe-live-key', re: /\b[sr]k_live_[0-9A-Za-z]{24,}\b/ },
   { id: 'anthropic-api-key', re: /\bsk-ant-[A-Za-z0-9_-]{20,}\b/ },
-  { id: 'generic-assignment', re: /\b(?:password|passwd|secret|token|api[_-]?key|access[_-]?key|client[_-]?secret)\b["']?\s*[:=]\s*["']([^"'\s]{8,})["']/i },
+  // The name may carry a prefix (DB_PASSWORD, AWS_SECRET_ACCESS_KEY). Value: quoted (8+) or unquoted (16+).
+  { id: 'generic-assignment', re: /(?<![A-Za-z0-9])(?:[A-Za-z0-9]*[_-])?(?:password|passwd|secret|token|api[_-]?key|access[_-]?key|client[_-]?secret)\b["']?\s*[:=]\s*(?:["']([^"'\s]{8,})["']|([^\s"'#,]{16,}))/i },
 ];
 // A generic-assignment value is a placeholder only when the WHOLE value matches.
 const PLACEHOLDER = /^(?:x+|\*+|changeme|change_me|example|placeholder|dummy|redacted|your[_-][a-z_-]*|<[^>]*>|\$\{[^}]*\}|\{\{[^}]*\}\})$/i;
+// An unquoted value that looks like code (a call, an index, a dotted name, a $VAR) is not a secret.
+const CODE_LIKE = /[()[\]{};]|^\$[A-Za-z_]\w*$|^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$/;
 const ALLOW = 'shipwright:allow-secret';
 const MAX_UNTRACKED_BYTES = 1024 * 1024;
 
@@ -33,7 +38,11 @@ export function scanLines(file, lines) {
       const re = new RegExp(rule.re.source, rule.re.flags + 'g');
       let hit = false;
       for (const m of text.matchAll(re)) {
-        if (rule.id === 'generic-assignment' && PLACEHOLDER.test(m[1])) continue;
+        if (rule.id === 'generic-assignment') {
+          const value = m[1] ?? m[2];
+          if (PLACEHOLDER.test(value)) continue;
+          if (m[1] === undefined && CODE_LIKE.test(value)) continue;
+        }
         hit = true;
         break;
       }
@@ -47,6 +56,10 @@ export function scanLines(file, lines) {
 // line outside a hunk body (headers, "Binary files differ") is ignored, and hunk
 // bodies are consumed by their declared counts so "+++ ..." content is content.
 export function scanFileDiff(file, diffText) {
+  return scanLines(file, addedLines(diffText));
+}
+
+function addedLines(diffText) {
   const added = [];
   const lines = diffText.split(/\r?\n/);
   for (let i = 0; i < lines.length; i += 1) {
@@ -65,7 +78,18 @@ export function scanFileDiff(file, diffText) {
       i += 1;
     }
   }
-  return scanLines(file, added);
+  return added;
+}
+
+// Lines of the working-tree file that carry the allow marker (empty when the file is gone).
+function allowedLines(cwd, file) {
+  try {
+    const full = path.join(cwd, file);
+    if (fs.statSync(full).size > MAX_UNTRACKED_BYTES) return [];
+    return fs.readFileSync(full, 'utf8').split(/\r?\n/).filter((t) => t.includes(ALLOW));
+  } catch {
+    return [];
+  }
 }
 
 function git(args, cwd) {
@@ -81,6 +105,40 @@ function defaultBase(cwd) {
   throw new Error('no --base given and none of origin/HEAD, main, master exists');
 }
 
+// Every non-merge commit in <mergeBase>..HEAD: scan its added lines and flag the
+// secret files it adds. Findings carry the commit's short SHA. A hit whose line
+// is still in the working tree with the allow marker added later counts as
+// acknowledged (the marker cannot be added to history).
+export function scanHistory(mergeBase, cwd) {
+  const findings = [];
+  const seen = new Set();
+  const add = (f) => {
+    const key = [f.file, f.line, f.rule, f.commit].join('\0');
+    if (!seen.has(key)) { seen.add(key); findings.push(f); }
+  };
+  const commits = git(['log', '--no-merges', '--format=%H %h', `${mergeBase}..HEAD`], cwd).split('\n').filter(Boolean);
+  for (const entry of commits) {
+    const [sha, short] = entry.trim().split(' ');
+    const ns = git(['show', '--name-status', '-z', '--no-renames', '--format=', sha], cwd).replace(/^\n+/, '').split('\0');
+    for (let i = 0; i + 1 < ns.length; i += 2) {
+      const status = ns[i].trim()[0];
+      const file = ns[i + 1];
+      if (status === 'D') continue;
+      if (status === 'A' && isSecretPath(file, '.')) add({ file, line: 0, rule: 'secret-file', commit: short });
+      const lines = addedLines(git(['show', '-U0', '--no-color', '--no-ext-diff', '--format=', sha, '--', file], cwd));
+      const hits = scanLines(file, lines);
+      if (hits.length === 0) continue;
+      const allowed = allowedLines(cwd, file);
+      for (const f of hits) {
+        const text = lines.find((l) => l.line === f.line).text.trim();
+        if (allowed.some((t) => t.includes(text))) continue;
+        add({ ...f, commit: short });
+      }
+    }
+  }
+  return findings;
+}
+
 function main() {
   const args = process.argv.slice(2);
   const baseIdx = args.indexOf('--base');
@@ -92,6 +150,7 @@ function main() {
     git(['rev-parse', '--is-inside-work-tree'], cwd);
     const base = baseIdx >= 0 ? args[baseIdx + 1] : defaultBase(cwd);
     if (!base) throw new Error('--base needs a ref');
+    if (base.startsWith('-')) throw new Error('--base must be a ref, not an option (it starts with "-")');
     const mergeBase = git(['merge-base', base, 'HEAD'], cwd).trim();
     const ns = git(['diff', '--name-status', '-z', '--no-renames', mergeBase], cwd).split('\0');
     const changed = [];
@@ -117,6 +176,11 @@ function main() {
       if (text.includes('\0')) continue;
       findings.push(...scanLines(file, text.split(/\r?\n/).map((t, i) => ({ line: i + 1, text: t }))));
     }
+    // A net finding that a commit already explains (same file, line, rule) is shown once, with its commit.
+    const history = scanHistory(mergeBase, cwd);
+    const key = (f) => [f.file, f.line, f.rule].join('\0');
+    const inHistory = new Set(history.map(key));
+    findings = [...findings.filter((f) => !inHistory.has(key(f))), ...history];
     fileCount = changed.length + untracked.length;
   } catch (err) {
     process.stderr.write(`secret-scan: ${err.message}\n`);
@@ -128,7 +192,7 @@ function main() {
     process.stdout.write(`secret-scan: clean (${fileCount} files scanned${skipped})\n`);
     return;
   }
-  process.stdout.write(`secret-scan: ${findings.length} finding(s)\n${findings.map((f) => `  - ${f.file}:${f.line} ${f.rule}`).join('\n')}\n`);
+  process.stdout.write(`secret-scan: ${findings.length} finding(s)\n${findings.map((f) => `  - ${f.file}:${f.line} ${f.rule}${f.commit ? ` (commit ${f.commit})` : ''}`).join('\n')}\n`);
   process.exitCode = 1;
 }
 
