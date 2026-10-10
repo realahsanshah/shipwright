@@ -22,7 +22,7 @@ Inputs: the paths to `spec.md`, `plan.md` and `build-log.md`, plus the step numb
 5. Run the step's test, then the project's full test command from its CLAUDE.md, and record GREEN. Fix any lint or format errors fed back by the `post-edit-format` hook before committing.
 6. Stage only the step's files and its tests by path with `git add <paths>`. Never `git add -A` and never `git add .`.
 7. Commit with the subject `<id> step <N>: <title>`, where `<id>` is the ticket id and `<title>` is the plan step's title.
-8. Get the short SHA with `git rev-parse --short HEAD` after committing, then append the step's entry to `build-log.md` in exactly this format. If the file does not exist, start it with `# Build log: <id>`. `Attempts:` is the number of GREEN attempts used. The values below are examples of the format only; replace every one of them and never copy them. `.delivery/` files are never part of a step commit, so `build-log.md` is updated after the commit and left uncommitted.
+8. Get the short SHA with `git rev-parse --short HEAD` after committing, then append the step's entry to `build-log.md` in exactly this format; if `build-log.md` already has an entry for this step, replace it instead, and never leave two entries for one step. If the file does not exist, start it with `# Build log: <id>`. `Attempts:` is the number of GREEN attempts used. The values below are examples of the format only; replace every one of them and never copy them. `.delivery/` files are never part of a step commit, so `build-log.md` is updated after the commit and left uncommitted.
 
 ```
 ## Step 1: CSV serializer for appointments

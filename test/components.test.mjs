@@ -95,3 +95,22 @@ test('test-strategy skill, planner agent and builder agent carry their contracts
   const bt = parseFrontmatter(builder).data.tools;
   for (const t of ['Bash', 'Edit', 'Write']) assert.ok(bt.includes(t), `builder needs ${t}`);
 });
+
+test('frontmatter values containing ": " are quoted (YAML safety)', () => {
+  const files = [];
+  for (const d of ['commands', 'agents']) {
+    for (const f of fs.readdirSync(new URL(`../${d}/`, import.meta.url))) if (f.endsWith('.md')) files.push(`${d}/${f}`);
+  }
+  for (const s of fs.readdirSync(new URL('../skills/', import.meta.url))) {
+    if (fs.existsSync(new URL(`../skills/${s}/SKILL.md`, import.meta.url))) files.push(`skills/${s}/SKILL.md`);
+  }
+  for (const file of files) {
+    const m = fs.readFileSync(new URL(`../${file}`, import.meta.url), 'utf8').replace(/^\uFEFF/, '').match(/^---\r?\n([\s\S]*?)\r?\n---/);
+    if (!m) continue;
+    for (const line of m[1].split(/\r?\n/)) {
+      const kv = line.match(/^([A-Za-z_-]+):\s+(.*)$/);
+      if (!kv || !kv[2].includes(': ')) continue;
+      assert.match(kv[2], /^(".*"|'.*')$/, `${file}: unquoted value with ": " in "${kv[1]}"`);
+    }
+  }
+});
