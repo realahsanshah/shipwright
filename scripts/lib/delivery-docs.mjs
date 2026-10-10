@@ -300,6 +300,7 @@ export function parseReview(text) {
     commit: preambleField(preamble, 'Commit'),
     status: preambleField(preamble, 'Status'),
     mode: preambleField(preamble, 'Mode'),
+    round: /^\d+$/.test(preambleField(preamble, 'Round') ?? '') ? Number(preambleField(preamble, 'Round')) : null,
     sections: parsed,
   };
 }
@@ -309,6 +310,7 @@ export function checkReview(review) {
   if (!review.commit || !SHA.test(review.commit)) errors.push('missing "Commit: <sha>" line');
   if (!['PASS', 'FAIL'].includes(review.status)) errors.push('missing "Status: PASS" or "Status: FAIL" line');
   if (!['agents', 'solo'].includes(review.mode)) errors.push('missing "Mode: agents" or "Mode: solo" line');
+  if (!Number.isInteger(review.round) || review.round < 1) errors.push('missing "Round: N" line (N ≥ 1)');
   let allPass = true;
   for (const name of REVIEW_SECTIONS) {
     const section = review.sections.get(name);

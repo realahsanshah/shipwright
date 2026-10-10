@@ -89,8 +89,8 @@ ${ev.join('\n')}
 }
 
 // A passing review.md. Preamble fields take null to drop the line; `code` and `security` replace the section bodies.
-export function reviewText({ commit = '9e05129', status = 'PASS', mode = 'agents', code, security } = {}) {
-  const head = [['Commit', commit], ['Status', status], ['Mode', mode]]
+export function reviewText({ commit = '9e05129', status = 'PASS', mode = 'agents', round = 1, code, security } = {}) {
+  const head = [['Commit', commit], ['Status', status], ['Mode', mode], ['Round', round]]
     .filter(([, v]) => v !== null).map(([k, v]) => `${k}: ${v}`).join('\n');
   return `# Review: HC-142
 

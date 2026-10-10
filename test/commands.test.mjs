@@ -136,7 +136,7 @@ test('/verify: embedded template parses with parseVerifyReport', async () => {
 test('/review: entry gates, both reviewers, diff exclusion, fix loop, gate script', () => {
   const md = read('commands/review.md');
   for (const phrase of [
-    'check-verify.mjs', 'check-review.mjs',
+    'check-verify.mjs', 'check-review.mjs', 'Round:', 'never reset',
     '${CLAUDE_PLUGIN_ROOT}/agents/code-reviewer.md', '${CLAUDE_PLUGIN_ROOT}/agents/security-reviewer.md',
     'review.md', 'pr-description.md', 'Mode: solo', 'Mode: agents',
     ':(exclude).delivery', '--head', '3 rounds', '<id> fix:', 'Notes for CLAUDE.md',
@@ -146,7 +146,8 @@ test('/review: entry gates, both reviewers, diff exclusion, fix loop, gate scrip
 });
 
 test('/review: embedded templates satisfy checkReview and checkPrDescription', async () => {
-  const { parseReview, checkReview, parsePrDescription, checkPrDescription } = await import('../scripts/lib/delivery-docs.mjs');
+  const { parseReview, checkReview, parsePrDescription, checkPrDescription, parseSpec } = await import('../scripts/lib/delivery-docs.mjs');
+  const { specText } = await import('./helpers/delivery-fixtures.mjs');
   const md = read('commands/review.md');
   const blocks = [...md.matchAll(/```markdown\r?\n([\s\S]*?)```/g)].map((m) => m[1]);
   const rev = blocks.find((b) => b.includes('## Code review'));
@@ -156,5 +157,5 @@ test('/review: embedded templates satisfy checkReview and checkPrDescription', a
   assert.ok(pr, 'review.md must embed a pr-description template');
   const parsed = parsePrDescription(pr);
   assert.ok(parsed.title);
-  assert.deepEqual(checkPrDescription({ acIds: ['AC-1'] }, parsed), []);
+  assert.deepEqual(checkPrDescription(parseSpec(specText({ acs: ['AC-1'] })), parsed), []);
 });

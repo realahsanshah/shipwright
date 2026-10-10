@@ -369,6 +369,9 @@ test('review preamble lines are each required', () => {
   assert.ok(reviewErrors(reviewText({ status: null })).some((e) => /Status/.test(e)));
   assert.ok(reviewErrors(reviewText({ mode: null })).some((e) => /Mode/.test(e)));
   assert.ok(reviewErrors(reviewText({ mode: 'fleet' })).some((e) => /Mode/.test(e)));
+  assert.ok(reviewErrors(reviewText({ round: null })).includes('missing "Round: N" line (N ≥ 1)'));
+  for (const r of ['0', 'two', '-1']) assert.ok(reviewErrors(reviewText({ round: r })).some((e) => /Round/.test(e)), r);
+  assert.equal(parseReview(reviewText({ round: 3 })).round, 3);
 });
 
 test('review sections and verdicts', () => {

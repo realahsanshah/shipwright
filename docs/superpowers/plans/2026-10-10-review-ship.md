@@ -41,6 +41,7 @@
 Commit: 9e05129
 Status: PASS
 Mode: agents
+Round: 1
 
 ## Code review
 
@@ -55,7 +56,7 @@ Verdict: PASS
 None.
 ```
 Rules:
-- The preamble has `Commit:` (7–40 hex), `Status: PASS|FAIL` and `Mode: agents|solo`.
+- The preamble has `Commit:` (7–40 hex), `Status: PASS|FAIL` and `Mode: agents|solo` and `Round: N` (integer, 1 or more; the review round, persisted so the 3-round cap holds across invocations).
 - Exactly two sections, `## Code review` and `## Security review`, each with a `Verdict: PASS` or `Verdict: BLOCKING` line.
 - Each finding is a bullet starting `[blocking]` or `[non-blocking]`.
 - A section's Verdict is BLOCKING if and only if it has at least one `[blocking]` finding.
